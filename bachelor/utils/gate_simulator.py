@@ -12,7 +12,7 @@ start_states = []
 solvers = []
 t0s = []
 
-def init_sim(H0, H,c_ops, n_opp,phi_opp, initial_state="even",opp_solver=False):
+def init_sim(H0, H,c_ops, n_opp,phi_opp, initial_state="even",opp_solver=False,maxstep=2):
     #qbi.init_qubit(1.3,0.59,5.71,np.pi)
     #global start_states
     #global solvers
@@ -52,7 +52,8 @@ def init_sim(H0, H,c_ops, n_opp,phi_opp, initial_state="even",opp_solver=False):
         #H = H.to('cupyd')
         #c_ops = [c.to('cupyd') for c in c_ops]
         #solvers.append(qt.MESolver(H,c_ops=c_ops, options={'store_final_state':True, 'progress_bar': None, "method": "bdf", "max_step": 2}))#, "min_step": tau/100}))
-        s = qt.MESolver(H,c_ops=c_ops, options={'store_final_state':True, 'progress_bar': None, "method": "bdf", "max_step": 2})#, "min_step": tau/100})
+        #step = float((H(0).full()[1,1] - H(0).full()[0,0])**(-1)*np.pi)
+        s = qt.MESolver(H,c_ops=c_ops, options={'store_final_state':True, 'progress_bar': None, "method": "bdf", "nsteps": 100000,"max_step": maxstep})
         if opp_solver:
             solvers.append(qt.Propagator(s))#,c_ops=c_ops, options={'store_final_state':True, 'progress_bar': None, "method": "bdf", "max_step": 2}))#, "min_step": tau/100}))
         else:
@@ -68,10 +69,10 @@ def init_sim(H0, H,c_ops, n_opp,phi_opp, initial_state="even",opp_solver=False):
 
 import asyncio
 import multiprocessing
-def simulate(solvers, start_states, t0,t_length):
+def simulate(solvers, start_states, t0,t_end):
     #global solvers
     t0 = float(t0)
-    t_length = float(t_length)
+    t_end = float(t_end)
     results = []
     i = 0
     class ListWName(list):#an object that is the same as list, but has a "name" attribute
@@ -85,37 +86,13 @@ def simulate(solvers, start_states, t0,t_length):
         #print(start_states[j].full())
         #result = solvers[i].run(start_states[j], np.linspace(t0,t_length,int(500)))
         if is_opp_solver:
-            prop = solvers[i](t_length+t0, 0)
+            prop = solvers[i](t_end, t0)
             #print(prop.full())
-            """kraus_ops = qt.to_kraus(prop)
-            nan_mask = []
-            for k in kraus_ops:
-                print(k.full())
-                if np.isnan(k.full()).any():
-                    nan_mask.append(True)
-                else:
-                    nan_mask.append(False)
-            kraus_ops = [k for k, mask in zip(kraus_ops, nan_mask) if not mask]#!temp
-            result = ListWName()
-            for k in kraus_ops:
-                #print(kraus_ops[k].full())
-                result.append(k)"""
+
             result = prop
         else:
-            result = solvers[i].run(start_states[j], np.linspace(t0,t_length+t0,200))
+            result = solvers[i].run(start_states[j], np.linspace(t0,t_end,200))
         
-        
-        """process = multiprocessing.Process(target=solvers[i].run, args=(start_states[j], np.linspace(t0,t_length+t0,1000), [], []))
-        process.start()
-        process.join(timeout=timeout)
-        if process.is_alive():
-            print(f"Process {i} timed out")
-            process.terminate()
-            process.join()
-            result = None
-        else:
-            result = solvers[i].results
-        i += 1"""
         results.append(result)
         #print(result.states[0].full())
     return results

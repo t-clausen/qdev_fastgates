@@ -13,10 +13,13 @@ import sympy as sp
 from copy import deepcopy as copy
 import adaptive
 config = {}
-with open("config.txt", "r") as f:
-    for line in f.readlines():
-        line = line.strip()
-        config[line.split(":")[0]] = eval(line.split(":")[1])
+try:
+    with open("config.txt", "r") as f:
+        for line in f.readlines():
+            line = line.strip()
+            config[line.split(":")[0]] = eval(line.split(":")[1])
+except FileNotFoundError:
+    config = {}
 class AdaptiveLearner:
     def conv_bounds(self, bounds, xs):
         #make a mask for the values that are non-fixed
@@ -28,8 +31,8 @@ class AdaptiveLearner:
     def __init__(self, known_dps, bounds, framework="adaptive", truncation=2):
         #known_dps are expected to be a list of dictionaries
         ys = [dp["score"] for dp in known_dps]
-        xs = [[dp["Ec"], dp["El"], dp["Ej"], dp['omega_01_target'], dp['alpha_target'], dp["phi_dc"],dp["Lambdas"],dp["L1"],dp["L2"]] for dp in known_dps]
-        point_keys = ["Ec", "El", "Ej", "omega_01_target", "alpha_target", "phi_dc", "Lambdas", "L1", "L2"]
+        xs = [[dp["Ec"], dp["El"], dp["Ej"], dp['omega_01_target'], dp['alpha_target'], dp["phi_dc"],dp["Lambdas"],dp["T1"],dp["T2"]] for dp in known_dps]
+        point_keys = ["Ec", "El", "Ej", "omega_01_target", "alpha_target", "phi_dc", "Lambdas", "T1", "T2"]
         self.ys = np.array(ys)
         self.xs = np.array(xs)
         self.point_keys = point_keys
@@ -183,7 +186,7 @@ class AdaptiveLearner:
             rpoints.append(rpoint)
         #covnert L1,L2 to decay opperators
         for i in range(len(rpoints)):
-            rpoints[i] = self.convert_Ln_2_decay(rpoints[i])
+            rpoints[i] = self.convert_Tn_2_decay(rpoints[i])
         #name these qubits by their data
         #and check if this name has an index
         qubit_names = {}
@@ -191,7 +194,7 @@ class AdaptiveLearner:
             with open("qubit_names.pickle", "rb") as f:#interprit as dict
                 qubit_names = pickle.load(f)
         for i in range(len(rpoints)):
-            name = f"qubit_{rpoints[i]['Ec']}_{rpoints[i]['El']}_{rpoints[i]['Ej']}_{rpoints[i]['phi_dc']}_{rpoints[i]['Lambdas']}_{rpoints[i]['L1']}_{rpoints[i]['L2']}"
+            name = f"qubit_{rpoints[i]['Ec']}_{rpoints[i]['El']}_{rpoints[i]['Ej']}_{rpoints[i]['phi_dc']}_{rpoints[i]['Lambdas']}_{rpoints[i]['T1']}_{rpoints[i]['T2']}"
             rpoints[i]["name"] = name
             if name not in qubit_names.keys():
                 qubit_names[name] = len(qubit_names)
@@ -258,17 +261,22 @@ class AdaptiveLearner:
             pass
         else:
             raise NotImplementedError(f"Framework {self.framework} is not implemented")
-    def convert_Ln_2_decay(self, point):
+    def convert_Tn_2_decay(self, point):
         #convert the length to decay
+        trunc = self.truncation
         for k in point.keys():
-            if k == "L1":
-                L1 = point[k]
-                c1 = np.array([[0,L1],[0,0]])
+            if k == "T1":
+                T1 = point[k]
+                #c1 = np.array([[0,L1],[0,0]])
                 #c1 = np.array([[0,0],[0,0]])
-            if k == "L2":
-                L2 = point[k]
-                c2 = np.array([[L2,0],[0,L2]])
+                c1 = qt.destroy(trunc)*np.sqrt(1/T1)
+            if k == "T2":
+                T2 = point[k]
+                #c2 = np.array([[L2,0],[0,L2]])
                 #c2 = np.array([[0,0],[0,0]])
+                gamma_phi = 1.0 / T2 - 0.5 / T1
+                c = f"-2*(H0-H0[0,0]*np.eye({trunc}))/(H0[1,1]-H0[0,0])"
+                c2 = f"({c})*np.sqrt({gamma_phi})"
         point["c_ops"] = [c1, c2]
         return point
 from scipy.optimize import minimize
@@ -317,10 +325,19 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
     scores = []
     Z_amps = []
     results_list = []
+    global_nshift = 0
     for cnt,t0 in enumerate(loop):#for each probing t0
         if gate_params.known_t0: 
-            n = t0
+            n = t0*2
             dt0 = gate_params.dt0_amp
+            t_0_edit = copy(gate_params.t_0)
+            #add = gate_params.t_0-sp.Symbol("dt_0")
+            for _ in range(100):
+                t_0_now = t_0_edit.subs(sp.symbols("n"), n+2*global_nshift).subs(sp.symbols("t_g"), t_g).subs(sp.symbols("omega_{01}"), H0[1,1]-H0[0,0]).subs(sp.symbols("dt_0"), dt0).evalf()
+                if t_0_now < 0:
+                    global_nshift += 1
+                else: break
+            n += 2*global_nshift
             print(f"Testing at n = {n}")
             t0 = None
         else:
@@ -331,7 +348,10 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
         #print(n_opp, phi_opp)
         gate_dynamics = copy(gate_dynamics.assert_opps(copy(n_opp), copy(phi_opp)))
         gate_dynamics = copy(gate_dynamics.compile_as_Qobj())
-        H0_sim, H_sim = copy(gate_dynamics.transform_2_rotating_frame(t_g,omega_01=copy(H0[1,1]-H0[0,0]),t0=t0, n=n,dt0=dt0))
+        if len(H0) > 2:
+            omega_12 = H0[2,2]-H0[1,1]
+        else: omega_12 = np.inf
+        H0_sim, H_sim = copy(gate_dynamics.transform_2_rotating_frame(t_g,omega_01=copy(H0[1,1]-H0[0,0]),omega_12=omega_12,t0=t0, n=n,dt0=dt0))
         #print(H_sim(2).full())
         #H = gate_dynamics.get_QuTiP_compile()
         #either opp-type or state-type solver
@@ -346,14 +366,14 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                 f.write(f"breakpoint\n")
         if n != None:
             t0 = gate_dynamics.t_0
-            t0 = t0.subs(sp.symbols("n"), 2*n)
+            t0 = t0.subs(sp.symbols("n"), n)
             t0 = t0.subs(sp.symbols("t_g"), t_g)
             t0 = t0.subs(sp.symbols("omega_{01}"), H0[1,1]-H0[0,0])
             t0 = t0.subs(sp.symbols("dt_0"), dt0)
             t0 = t0.evalf()
         #run solver
         if calZ: #to find opps for Z-opt
-            r = gs.simulate(opp_solvers, start_states, t0,1.1*t_g+t0)
+            r = gs.simulate(opp_solvers, start_states, t0,1.0*t_g+t0)
         else:#using the state solver and already found Z
             #raise NotImplementedError("Do inverse of Z on initial states")
             if not np.all(gate_params.VZ_amp == 0):
@@ -364,7 +384,7 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                 for i in range(len(start_states)):
                     ss = U_d_inv*start_states[i]*U_d_inv.dag()
                     ss_local.append(ss)
-                r = gs.simulate(solvers, ss_local, t0,1.1*t_g+t0)#!edit
+                r = gs.simulate(solvers, ss_local, t0,1.0*t_g+t0)#!edit
                 U_d = get_simple_gate([0,0,1], z_d, baselen=len(start_states[0].full()))
                 U_s = get_simple_gate([0,0,1], z_s, baselen=len(start_states[0].full()))
                 for i in range(len(r)):
@@ -379,17 +399,6 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
         if calZ: opperators = r
         else: results = r
         if calZ:#optimize Z-amps
-            """for i in range(len(results)):
-                def score_at_Zamp(Zamp):
-                    unitary = get_simple_gate([0,0,1], Zamp, baselen=len(results[i].states[0].full()))
-                    res_clone = copy(results[i])
-                    res_clone.states[-1] = unitary*res_clone.states[-1]*unitary.dag()
-                    score = ge.evaluate([res_clone],ideal_gate,light=True)
-                    return -score.real
-                #minimize the score
-                r = minimize(score_at_Zamp, 0.01, bounds=[(-1,1)])
-                val_best = r.x[0]   
-                Z_amps.append(val_best)"""
             #instead of the above, minimize the avg fidelity over all results
             a_s = []
             theta_cords = []
@@ -416,21 +425,6 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                     fs = opp_final @ ss
                     fs = qt.vector_to_operator(fs)
                     scores.append(ge.evaluate_onstate([fs],[start_states[i]],ideal_gate))
-
-                    """opp = qt.Qobj(1/np.sqrt(2)*(np.eye(2,2)+1j*qt.sigmay().full()))
-                    U = unitary*opp*unitary_inv
-                    fs = U*start_states[i]*U.dag()
-                    scores.append(ge.evaluate_onstate([fs],[start_states[i]],ideal_gate))"""
-
-                    """opp = qt.Qobj(1/np.sqrt(2)*(np.eye(2,2)+1j*qt.sigmay().full()))
-                    opp = qt.to_super(opp)
-                    U = qt.to_super(unitary)
-                    U_inv = qt.to_super(unitary_inv)
-                    opp_final = U @ opp @ U_inv
-                    ss = qt.operator_to_vector(start_states[i])
-                    fs = opp_final @ ss
-                    fs = qt.vector_to_operator(fs)
-                    scores.append(ge.evaluate_onstate([fs],[start_states[i]],ideal_gate))"""
                     #scores.append(ge.evaluate_onstate([ss3],[start_states[i]],ideal_gate))
                 a = np.log10(1-np.mean(scores).real)#!edit
                 theta_cords.append(Zamps)
@@ -452,11 +446,6 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                 if a <= -7:
                     raise StopIteration("Target fidelity reached")
                 return a
-            #minimize the score
-            #start by trying 4
-            #thetas = [0, np.pi/2, np.pi, 3*np.pi/2]
-            #losses = [score_at_Zamp(theta) for theta in thetas]
-            #val_best = thetas[np.argmin(losses)]
             try:
                 r = minimize(score_at_Zamp, (0,0), method="Nelder-Mead")
                 val_best = r.x
@@ -494,16 +483,9 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                 fs = qt.vector_to_operator(fs)
                 results_list[i][j] = ResultPacker([fs])
                 scores.append(ge.evaluate_onstate([fs],[start_states[j]],ideal_gate))
-                """ss = qt.operator_to_vector(start_states[j])
-                ss1 = unit_inv*ss
-                ss2 = results_list[i][j]*ss1
-                ss3 = unit*ss2
-                ss3 = qt.vector_to_operator(ss3)
-                results_list[i][j] = ResultPacker([ss3])"""
-                #results_list[i][j].states[-1] = unit*results_list[i][j].states[-1]*unit.dag()
         gate_params.VZ_amp = Z_amp_avg
         gate_params.VZ_amp_buffer = []
-        if config["bloch"] and False:
+        if config["bloch"]:
             z_d = gate_params.VZ_amp[0]
             z_s = gate_params.VZ_amp[1]
             solvers_loc, start_states_loc = gs.init_sim(H0_sim, H_sim, c_opps, n_opp, phi_opp,initial_state="even",opp_solver=False)
@@ -524,12 +506,6 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
             for i in range(len(r)):
                 ge.evaluate([r[i]],ideal_gate)
             pass
-    """elif gate_params.VZ_amp != 0:
-        
-        unit = get_simple_gate([0,0,1], gate_params.VZ_amp, baselen=len(results[0].states[0].full()))
-        for i in range(len(results_list)):
-            for j in range(len(results_list[i])):
-                results_list[i][j].states[-1] = unit*results_list[i][j].states[-1]*unit.dag()"""
     for i in range(len(results_list)):
         results = results_list[i]
         if len(results[0].states) > 1:#wether only one state or full states is present
@@ -537,7 +513,7 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
         else:
             score = ge.evaluate_onstate(results,start_states,ideal_gate)
         scores.append(score)
-        if config["H_log"]:
+        if "H_log" in config and config["H_log"]:
             with open("temp/H_log.txt", "r") as f:
                 lines = f.readlines()
                 #find lines with "breakpoint"
@@ -590,8 +566,8 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
         "omega_01_target": qubit["omega_01_target"],
         "score": s,
         "gate": gate,
-        "L1": qubit["L1"],
-        "L2": qubit["L2"],
+        "T1": qubit["T1"],
+        "T2": qubit["T2"],
     }
     #scheme_scores_raw.append(dp)
     return s,dp, gate_params
@@ -609,51 +585,7 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
         if "Omega" in key:
             Z_now = True
         if gate_params.is_calibrated[key] == False:
-            """gate_in_matrix = True
-            qb_in_matrix = True
-            #first check if (A) calibration matrix exists, and (B) if it has an entry for this gate/qubit
-            gate_name = gate_params.name
-            matrixname = f"temp/calibration_matrix_val={key}.pickle"
-            if Z_now: matrixname2 = f"temp/calibration_matrix_val=VZ.pickle"
-            if os.path.exists(matrixname):
-                while os.path.exists(matrixname.replace(".pickle", "")):#a read protection file
-                    time.sleep(0.1)
-                with open(matrixname, "rb") as f:
-                    matrix = pickle.load(f)
-                if Z_now :
-                    with open(matrixname2, "rb") as f:
-                        matrix2 = pickle.load(f)
-                if gate_name in matrix.keys():
-                    #check if the qubit is in the matrix
-                    if qubit["index"] in matrix[gate_name].keys():
-                        #get the value
-                        val = matrix[gate_name][qubit["index"]]
-                        if Z_now:
-                            val2 = matrix2[gate_name][qubit["index"]]
-                        #assert the value
-                        #gate_params.assert_calibration(key, val)
-                        exec(f"gate_params.{valname}_amp = val")
-                        if Z_now:
-                            exec(f"gate_params.VZ_amp = val2")
-                    else:
-                        qb_in_matrix = False
-                else:
-                    gate_in_matrix = False
-                    qb_in_matrix = False
-            else:
-                matrix = {}
-                if Z_now: matrix2 = {}
-                gate_in_matrix = False
-                qb_in_matrix = False
-            if not gate_in_matrix:
-                #create a new matrix
-                matrix[gate_name] = {}
-                if Z_now: matrix2[gate_name] = {}
-                if not qb_in_matrix:
-                    #create a new entry for the qubit
-                    matrix[gate_name][qubit["index"]] = 0
-                    if Z_now: matrix2[gate_name][qubit["index"]] = 0
-            #next actually do the calibration"""
+
             if True:#not gate_in_matrix or not qb_in_matrix:
                 #create a new matrix
                 
@@ -689,7 +621,7 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
                 #    (ys[1]-ys[0] < 0 & np.isclose(xs[0],0),True),
                 #    (-np.infty,lambda xs,ys: (np.power(np.diff(xs)/(bnds[1]-bnds[0]),-1))*(1.05-np.mean(ys))*np.mean(np.array(xs)+1))
                 #)
-                if "Omega" in valname:
+                """if "Omega" in valname:
                     def loss_per_interval(xs,ys):
                         if np.isclose(xs[0],0) and ys[1]-ys[0] < 0:
                             return -np.inf, True
@@ -741,16 +673,43 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
                 points = data.T[0]
                 scores = data.T[1]
                 indx_best = np.argmax(scores)
-                val = points[indx_best]
+                val = points[indx_best]"""
+                #instead, just throw a neldor-mead at the 
+                vals = []
+                scores = []
+                def score_at_val(val, *args):
+                    gate_params_local = copy(gate_params)
+                    val = val[0]#unwrap
+                    exec(f"gate_params_local.{valname}_amp = val")
+                    score, datapoint, gate_params_local = eval_qubit(gate_params_local, qubit, t0_samplerate=3, calZ=True)
+                    l =np.log10(1-score.real)
+                    vals.append(val)
+                    scores.append(l)
+                    if l < -7 or score.real > 1:
+                        raise StopIteration("Target fidelity reached")
+                    if l == np.nan:
+                        print(f"Invalid score for {valname} = {val}, score = {l}")
+                        return 1
+                    return l
+                try:
+                    r = minimize(score_at_val, initial, method="Nelder-Mead", bounds=[bnds])
+                    val = r.x[0]
+                    indx_best = np.argmin(scores)
+                except StopIteration as e:
+                    print(e)
+                    indx_best = np.argmin(scores)
+                    val = vals[indx_best]
                 exec(f"gate_params.{valname}_amp = val")
+                scorebest = scores[indx_best]
+                print(f"Best score for {valname} was {val} with score {scorebest}")
                 if do_VZ:
                     score, datapoint, gate_params = eval_qubit(gate_params, qubit, t0_samplerate=3, calZ=True)
                 #put in matrix
-                matrix[gate_name][qubit["index"]] = val
+                """matrix[gate_name][qubit["index"]] = val
                 if Z_now:
-                    matrix2[gate_name][qubit["index"]] = gate_params.VZ_amp
+                    matrix2[gate_name][qubit["index"]] = gate_params.VZ_amp"""
             #save the matrix
-            while os.path.exists(matrixname.replace(".pickle", "")):#a read protection file
+            """while os.path.exists(matrixname.replace(".pickle", "")):#a read protection file
                 time.sleep(0.1)
             Path(matrixname.replace(".pickle", "")).touch()
             with open(matrixname.replace('.', '_temp.'), "wb") as f:
@@ -764,7 +723,7 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
             try:
                 os.remove(matrixname.replace(".pickle", ""))
             except FileNotFoundError:
-                pass
+                pass"""
     return qubit, gate_params
 
 import matplotlib
@@ -774,60 +733,6 @@ def two_param(gate_params, qubit, gate, do_VZ=False):
         if "VZ" in key:
             continue#Z routine is associated with omega"""
     keys = [k for k in gate_params.is_calibrated.keys() if "VZ" not in k]
-    #valname = key
-    #Z_now = False
-    #if "Omega" in key:
-    #    Z_now = True
-    #!skipping matrix stuff
-    #if gate_params.is_calibrated[key] == False:
-    #    gate_in_matrix = True
-    #    qb_in_matrix = True
-    #    #first check if (A) calibration matrix exists, and (B) if it has an entry for this gate/qubit
-    #    gate_name = gate_params.name
-    #    matrixname = f"temp/calibration_matrix_val={key}.pickle"
-    #    if Z_now: matrixname2 = f"temp/calibration_matrix_val=VZ.pickle"
-    #    if os.path.exists(matrixname):
-    #        while os.path.exists(matrixname.replace(".pickle", "")):#a read protection file
-    #            time.sleep(0.1)
-    #        with open(matrixname, "rb") as f:
-    #            matrix = pickle.load(f)
-    #        if Z_now :
-    #            with open(matrixname2, "rb") as f:
-    #                matrix2 = pickle.load(f)
-    #        if gate_name in matrix.keys():
-    #            #check if the qubit is in the matrix
-    #            if qubit["index"] in matrix[gate_name].keys():
-    #                #get the value
-    #                val = matrix[gate_name][qubit["index"]]
-    #                if Z_now:
-    #                    val2 = matrix2[gate_name][qubit["index"]]
-    #                #assert the value
-    #                #gate_params.assert_calibration(key, val)
-    ##                exec(f"gate_params.{valname}_amp = val")
-    #               if Z_now:
-    #                    exec(f"gate_params.VZ_amp = val2")
-    #            else:
-    #                qb_in_matrix = False
-    #        else:
-    #            gate_in_matrix = False
-    #            qb_in_matrix = False
-    #    else:
-    #        matrix = {}
-    #        if Z_now: matrix2 = {}
-    #        gate_in_matrix = False
-    #        qb_in_matrix = False
-    #    if not gate_in_matrix:
-    #        #create a new matrix
-    #        matrix[gate_name] = {}
-    #        if Z_now: matrix2[gate_name] = {}
-    ##        if not qb_in_matrix:
-    # #           #create a new entry for the qubit
-    #            matrix[gate_name][qubit["index"]] = 0
-    #            if Z_now: matrix2[gate_name][qubit["index"]] = 0
-    #    #next actually do the calibration
-    #    if not gate_in_matrix or not qb_in_matrix:
-            #create a new matrix
-            
     #do the calibration
     H0, n_opp, phi_opp, c_ops, t_g, base_ex, base_size, Ec, El, Ej = qbi.init_qubit(qubit["Ec"], qubit["El"], qubit["Ej"], qubit["phi_dc"],qubit['omega_01_target'],qubit['alpha_target'], qubit["c_ops"], qubit["Lambdas"], truncation=qubit["truncation"], base_ex=qubit["base_ex"], base_size=qubit["base_size"],Ec_IC=qubit["Ec_IC"],El_IC=qubit["El_IC"],Ej_IC=qubit["Ej_IC"])
     qubit["base_ex"] = base_ex
@@ -935,7 +840,7 @@ def two_param(gate_params, qubit, gate, do_VZ=False):
             return sampler
         dummy = lambda x: None
         sampler = adaptive.Learner2D(dummy, bounds, loss_per_triangle=adaptive.learner.learner2D.areas)
-        basinfunction(initial_values, sampler,iter=30)
+        basinfunction(initial_values, sampler,iter=50)
         #basinfunction((0,i_vars[1]), sampler)
         #basinfunction((bnds[0][1],i_vars[1]), sampler)
         # sampler.bounds_are_done = True
@@ -945,7 +850,7 @@ def two_param(gate_params, qubit, gate, do_VZ=False):
             dists[:,1] /= np.abs(bounds[1][1]-bounds[1][0])
             dists = np.linalg.norm(dists, axis=1)
             return np.min(dists)
-        for i in range(10):
+        for i in range(5):
             iter = 13
             if i <= 1: iter = 1
             #pnt = sampler.ask(1)
@@ -973,36 +878,7 @@ def two_param(gate_params, qubit, gate, do_VZ=False):
     for i, key in enumerate(keys):
         exec(f"gate_params.{key}_amp = final[i]")"""
     gate_params = gates[np.argmin(scores)]
-    """if do_VZ:
-        _, _, gate_params = eval_qubit(gate_params, qubit, t0_samplerate=3, calZ=True)"""
-    
-    """
-    data = Sampler.to_numpy()
-    points = data.T[0]
-    scores = data.T[1]
-    indx_best = np.argmax(scores)
-    val = points[indx_best]
-    exec(f"gate_params.{valname}_amp = val")
-    #put in matrix
-    matrix[gate_name][qubit["index"]] = val
-    if Z_now:
-        matrix2[gate_name][qubit["index"]] = gate_params.VZ_amp
-    #save the matrix
-    while os.path.exists(matrixname.replace(".pickle", "")):#a read protection file
-        time.sleep(0.1)
-    Path(matrixname.replace(".pickle", "")).touch()
-    with open(matrixname.replace('.', '_temp.'), "wb") as f:
-        pickle.dump(matrix, f)
-    os.system(f"mv {matrixname} {matrixname.replace('.', '_old.')}")
-    os.system(f"mv {matrixname.replace('.', '_temp.')} {matrixname}")
-    os.system(f"rm {matrixname.replace('.', '_old.')}")
-    if Z_now:
-        with open(matrixname2, "wb") as f:
-            pickle.dump(matrix2, f)
-    try:
-        os.remove(matrixname.replace(".pickle", ""))
-    except FileNotFoundError:
-        pass"""
+
     return qubit, gate_params
 
 class Adaptive_1D_Custom():
@@ -1099,7 +975,9 @@ def calib_gate(args):
         qubit, gate_params = two_param(gate_params, qubit, gate, do_VZ)
     elif len(keys_wo_VZ) == 0:
         t1 = hasattr(gate_params,"lambda_eq")
-        t2 = sp.Symbol("omega_{01}") in gate_params.Omega_eq.free_symbols
+        if hasattr(gate_params,"Omega_eq"):
+            t2 = sp.Symbol("omega_{01}") in gate_params.Omega_eq.free_symbols
+        else: t2 = False
         t3 = "t_g" not in qubit.keys()
         if t1 or t2 or t3:
             H0, n_opp, phi_opp, c_ops, t_g, base_ex, base_size, Ec, El, Ej = qbi.init_qubit(qubit["Ec"], qubit["El"], qubit["Ej"], qubit["phi_dc"],qubit['omega_01_target'],qubit['alpha_target'], qubit["c_ops"], qubit["Lambdas"],truncation=qubit["truncation"], base_ex=qubit["base_ex"], base_size=qubit["base_size"],Ec_IC=qubit["Ec_IC"],El_IC=qubit["El_IC"],Ej_IC=qubit["Ej_IC"])
@@ -1109,12 +987,22 @@ def calib_gate(args):
             qubit["base_ex"] = base_ex
             qubit["base_size"] = base_size
             qubit["omega_01_actual"] = H0[1,1]-H0[0,0]
+            qubit["n_opp"] = n_opp
+            qubit["phi_opp"] = phi_opp
+            qubit['H0'] = H0
+            qubit["t_g"] = t_g
+            qubit["c_ops"] = c_ops
+            if len(H0) >= 3: qubit["omega_12_actual"] = H0[2,2]-H0[1,1]
+            else: qubit["omega_12_actual"] = np.inf
+            if len(H0) >= 4: qubit["omega_23_actual"] = H0[3,3]-H0[2,2]
+            else: qubit["omega_23_actual"] = np.inf
             if len(H0) <= 2: qubit['alpha_actual'] = np.inf
             else:            qubit["alpha_actual"] = H0[2,2]-H0[1,1] - (H0[1,1]-H0[0,0])
         if t3: t_g = qubit["Lambdas"]/(H0[1,1]-H0[0,0])*2*np.pi
         else: t_g = qubit["t_g"]
-        val = gate_params.Omega_eq.subs(sp.Symbol("t_g"),t_g)
-        exec(f"gate_params.Omega_amp = val")
+        if hasattr(gate_params,"Omega_eq"):
+            val = gate_params.Omega_eq.subs(sp.Symbol("t_g"),t_g)
+            exec(f"gate_params.Omega_amp = val")
         #one for lambda, one for wether omega_{01} is in Omega_eq
         
         
@@ -1128,6 +1016,29 @@ def calib_gate(args):
         if t2:
             val = gate_params.Omega_eq.subs(sp.Symbol("omega_{01}"),omega_01).subs(sp.Symbol("t_g"),qubit["t_g"])
             exec(f"gate_params.Omega_amp = val")
+        t4 = hasattr(gate_params,"get_matrix_inverse")
+        if t4: t4 = gate_params.get_matrix_inverse
+        if t4:
+            #get the inverted matrix such as to calculate the envelope fourier coefficients
+            func = gate_params.matrix_inverse
+            args = {
+                "t_g": t_g,
+                "omega_d": gate_params.omega_d,
+                "omega_01": qubit["omega_01_actual"],
+                "omega_12": qubit["omega_12_actual"],
+                "omega_23": qubit["omega_23_actual"],
+                "phi_opp": qubit["phi_opp"],
+                "gn_func": gate_params.gn_func,
+                "gm_func": gate_params.gm_func,
+                "forbidden_intervals": gate_params.forbidden_intervals,
+                "N": len(gate_params.envelope_coffs),
+                "doB": gate_params.doB,
+            }
+            c_arr = func(args)
+            gate_params.envelope_coffs = c_arr
+        if do_VZ:
+            _, _, gate_params = eval_qubit(gate_params, qubit, t0_samplerate=3, calZ=True)
+
     return qubit, gate_params
 
 from numpy.linalg import lstsq

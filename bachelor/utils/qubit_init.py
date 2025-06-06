@@ -19,10 +19,13 @@ import qutip as qt
 import scipy as scpy
 
 config = {}
-with open("config.txt", "r") as f:
-    for line in f.readlines():
-        line = line.strip()
-        config[line.split(":")[0]] = eval(line.split(":")[1])
+try:
+    with open("config.txt", "r") as f:
+        for line in f.readlines():
+            line = line.strip()
+            config[line.split(":")[0]] = eval(line.split(":")[1])
+except FileNotFoundError:
+    print("No config file found, using blank config")
 
 H0 = 0
 n_opp = 0
@@ -405,7 +408,7 @@ def solveEi(hamiltonian, truncation,meta="",gpu=True):
             eigvals = eigvals_
             eigvecs = eigvecs_
     else:
-        eigvals, eigvecs = scipy.sparse.linalg.eigsh(H, return_eigenvectors=True, which='SR')
+        eigvals, eigvecs = scipy.sparse.linalg.eigsh(H, k=truncation,return_eigenvectors=True, which='SR')
         sort = np.argsort(eigvals)
         eigvals = eigvals[sort]
         eigvecs = eigvecs[:,sort]
@@ -420,7 +423,7 @@ def solveEi(hamiltonian, truncation,meta="",gpu=True):
                 phase = x/np.abs(x)
                 eigvecs[:,i] /= phase
                 break
-    if config["eigenvecs"]:
+    if "eigenvecs" in config and config["eigenvecs"]:
         #plot
         plt.clf()
         plt.close('all')
@@ -441,7 +444,7 @@ def solveEi(hamiltonian, truncation,meta="",gpu=True):
 
 import matplotlib
 import pathlib
-def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_size=500,expansion_order=10,truncation=5,periodic=False,optim=True, Ec_IC=None, El_IC=None, Ej_IC=None):
+def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_size=500,expansion_order=10,truncation=5,periodic=False,optim=True, Ec_IC=None, El_IC=None, Ej_IC=None,force_size=False):
     #eigvals_landscape = []
     gradient = [np.inf,np.inf]#what to gain from varying the specific variables
     vary_mode = 0
@@ -464,7 +467,7 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
         #make cmap for differentiating the plots
         
         #phi = get_nphi_op(2*base_ex/base_size,base_size)
-        if config["eigenvecs"]:
+        if "eigenvecs" in config and config["eigenvecs"]:
             plt.clf()
             plt.close('all')
             plt.figure(figsize=(10,5))
@@ -482,14 +485,14 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
             plt.ylim(eigvals[0]-5- np.min(eigvals),eigvals[2]+10- np.min(eigvals))
 
             plt.savefig("eigenvecs.png")
-        fold = os.listdir("temp/eigenvecs")
-        values = [int(f.split("_")[-1].split(".")[0]) for f in fold]
-        if len(values) == 0: value = 0
-        else: value = np.max(values)+1
-        plt.savefig(f"temp/eigenvecs/eigenvecs_{value}.png")
-        plt.show()
-        plt.clf()
-        plt.close('all')
+            fold = os.listdir("temp/eigenvecs")
+            values = [int(f.split("_")[-1].split(".")[0]) for f in fold]
+            if len(values) == 0: value = 0
+            else: value = np.max(values)+1
+            plt.savefig(f"temp/eigenvecs/eigenvecs_{value}.png")
+            plt.show()
+            plt.clf()
+            plt.close('all')
     if omega_01 != None and alpha != None and optim:
         params2opt = []
         if Ec == None: params2opt.append("Ec")
@@ -543,7 +546,10 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
                 return np.inf
             eigvals, _, _ = solveEi(H0,truncation,meta=f"{Ec_},{El_},{Ej_},{phi_dc},{6*np.pi},{2000},{expansion_order}")
             omega_01_current = eigvals[1]-eigvals[0]
-            alpha_current = eigvals[2]-eigvals[1] - omega_01_current
+            if len(eigvals) >= 3:
+                alpha_current = eigvals[2]-eigvals[1] - omega_01_current
+            else: 
+                alpha_current = -1
             loss = lambda o,a: np.abs(o-omega_01)**4 + np.abs(a-alpha)**2
             l = loss(omega_01_current,alpha_current)
             Els.append(El_)
@@ -551,7 +557,7 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
             Ecs.append(Ec_)
             losses.append(l)
             #plot (just El and Ej)
-            if len(losses) > 1:
+            if len(losses) > 1 and 1 < 0:
                 plt.clf()
                 l_2plt = losses[-20:]
                 J_2plt = Ejs[-20:]
@@ -609,13 +615,13 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
             print("Error in Hamiltonian, returning None")
             return None, None, None, None
         #get diagonalization matrix
-        eigvals, eigvecs, basisTransform = solveEi(H0,truncation,meta=f"{Ec},{El},{Ej},{phi_dc},{base_ex},{base_size},{expansion_order}")
+        eigvals, eigvecs, basisTransform = solveEi(H0,truncation,meta=f"{Ec},{El},{Ej},{phi_dc},{base_ex},{base_size},{expansion_order},{truncation},__")
         return H0, eigvals, eigvecs, basisTransform
     H0, eigvals, eigvecs, basisTransform = sol(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex, base_size,expansion_order)
     last_eigvals = eigvals
     i = 0
     last_gradient = [np.inf,np.inf]
-    while not np.array([gradient[0]<0.0001, gradient[1]<0.0001]).all() and truncation > 2 and optim:
+    while not np.array([gradient[0]<0.0001, gradient[1]<0.0001]).all() and truncation > 2 and optim and not force_size:
         if vary_mode == 0:
             #vary base size
             base_size += 1000
@@ -668,7 +674,7 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
 from matplotlib import pyplot as plt
 from matplotlib import colors
 
-def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, base_size=1001,expansion_order=50, truncation=20,optimizebasis=True,Ec_IC=None, El_IC=None, Ej_IC=None):
+def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, base_size=1001,expansion_order=50, truncation=20,optimizebasis=True,Ec_IC=None, El_IC=None, Ej_IC=None,forceplot=False,force_size=False):
     global H0
     global n_opp
     global phi_opp
@@ -676,37 +682,46 @@ def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, ba
     #check cops
     if El == 0: periodic = True
     else: periodic = False
+    
+    H0_diag, eigenvecs, basisTransform, eigenvals, new_ex, new_size, Ec, El, Ej = get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex, base_size,expansion_order, truncation=truncation,periodic=periodic,optim=optimizebasis,Ec_IC=Ec_IC, El_IC=El_IC, Ej_IC=Ej_IC,force_size=force_size)
+    
     for i in range(len(c_ops)):
+        if type(c_ops[i]) == str:
+            c_ops[i] = eval(c_ops[i].replace("H0","H0_diag").replace("n_opp","n_opp").replace("phi_opp","phi_opp").replace("basisTransform","basisTransform"))
         if hasattr(c_ops[i],"full"):#qobj
-            c_ops[i] = c_ops[i].full()[:2,:2]
+            c_ops[i] = c_ops[i].full()
         c_ops_tmp = np.array(c_ops[i])
         c_ops[i] = np.zeros((truncation,truncation),dtype=np.complex128)
         c_ops[i][:len(c_ops_tmp),:len(c_ops_tmp)] = c_ops_tmp
 
-    H0_diag, eigenvecs, basisTransform, eigenvals, new_ex, new_size, Ec, El, Ej = get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex, base_size,expansion_order, truncation=truncation,periodic=periodic,optim=optimizebasis,Ec_IC=Ec_IC, El_IC=El_IC, Ej_IC=Ej_IC)
-    t_g = Lambdas/(H0_diag[1,1]-H0_diag[0,0])*2*np.pi
+    
+    if Lambdas != None:
+        t_g = Lambdas/(H0_diag[1,1]-H0_diag[0,0])*2*np.pi
+    else: t_g = None
     base_ex = new_ex
     base_size = new_size
     if H0_diag is None:
         print("Error in Hamiltonian, returning None")
         return None, None, None, None, None
+    if len(eigenvals) < truncation:
+        truncation = len(eigenvals)
     H0_diag = np.diag([eigenvals[i] for i in range(truncation)])-eigenvals[0]*np.eye(truncation)
     n = get_n_op(base_size,base_ex)
     phi = get_nphi_op(base_size,base_ex)
-    if config["melems"]:# and not is_figure_active():
-        cmap = plt.get_cmap('seismic')
-        print("Plotting n and phi")
-        fig,ax = plt.subplots(2,2)
-        extremum = np.max(np.abs(n))
-        ax[0,0].imshow(n.real[:10,:10], vmin=-extremum, vmax=extremum, cmap=cmap)
-        ax[0,1].imshow(n.imag[:10,:10], vmin=-extremum, vmax=extremum, cmap=cmap)
-        extremum = np.max(np.abs(phi))
-        ax[1,0].imshow(phi.real[:10,:10], vmin=-extremum, vmax=extremum, cmap=cmap)
-        ax[1,1].imshow(phi.imag[:10,:10], vmin=-extremum, vmax=extremum, cmap=cmap)
-        plt.savefig("n_phi_init.png")
-        plt.show()
-        plt.clf()
-        plt.close('all')
+    n_p = copy(n)
+    phi_p = copy(phi)
+    try:
+        n_p = n_p.asnumpy()
+        phi_p = phi_p.asnumpy()
+    except AttributeError:
+        try:
+            n_p = n_p.get()
+            phi_p = phi_p.get()
+        except AttributeError:
+            #if cupy, convert to numpy
+            n_p = n_p.todense()
+            phi_p = phi_p.todense()
+    
     
     #print(n-n.T.conj())
     basisTransform = cupy.asarray(basisTransform)
@@ -752,32 +767,187 @@ def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, ba
     basisTransform = tmp
     eigenvals = eigenvals[:truncation]
 
-    
-    
-    #plot
-    if config["melems"]:# and not is_figure_active():
+    if forceplot or ("melems" in config and config["melems"]):# and not is_figure_active():
+        
         print("Plotting n and phi")
-        fig,ax = plt.subplots(2,2)
-        cmap = plt.get_cmap('seismic')
-        extremum = np.max([np.max(np.abs(n_opp)),np.max(np.abs(phi_opp))]) 
+        fig,ax = plt.subplots(2,2,figsize=(5.4,4.5),dpi=100,constrained_layout=True)
+        #parse to np
+        """try:
+            n_p = n.asnumpy()
+            phi_p = phi.asnumpy()
+        except AttributeError:
+            n_p = n.get()
+            phi_p = phi.get()"""
+        extremum1 = np.max(np.abs(n_p))
+        extremum2 = np.max(np.abs(n_opp))
+        extremum_n = max(extremum1,extremum2)
+        extremum1 = np.max(np.abs(phi_p))
+        extremum2 = np.max(np.abs(phi_opp))
+        extremum_phi = max(extremum1,extremum2)
+
+        #ax[0,0].imshow(n_p.real[:10,:10], vmin=-extremum, vmax=extremum, cmap=cmap)
+        norm_n = colors.Normalize(vmin=-extremum_n, vmax=extremum_n)
+        norm_phi = colors.Normalize(vmin=-extremum_phi, vmax=extremum_phi)
+        cm = "PRGn"
+        cmap_n = plt.get_cmap(cm)
+        cmap_phi = plt.get_cmap(cm)
+
+        zero_mask = np.abs(n_p.imag) < 1e-10
+        n_p.imag[zero_mask] = np.nan
+        zero_mask = np.abs(phi_p.real) < 1e-10
+        phi_p.real[zero_mask] = np.nan
+
+        ax[0,0].imshow(n_p.imag[:4,:4], cmap=cmap_n, norm=norm_n)
+        ax[1,0].imshow(phi_p.real[:4,:4], cmap=cmap_phi, norm=norm_phi)
+        #draw dots to denote the continuation
+       
+        ax[0,0].plot(5,5,'o',color='black',markersize=2,alpha=0.5)
+        ax[1,0].plot(5,5,'o',color='black',markersize=2,alpha=0.5)
+        ax[0,0].plot(4,4,'o',color='black',markersize=2,alpha=0.5)
+        ax[1,0].plot(4,4,'o',color='black',markersize=2,alpha=0.5)
+        ax[0,0].plot(4.5,4.5,'o',color='black',markersize=2,alpha=0.5)
+        ax[1,0].plot(4.5,4.5,'o',color='black',markersize=2,alpha=0.5)
+
+        c1 = np.full((10,10),np.nan,dtype=np.float64)
+        c2 = np.full((10,10),np.nan,dtype=np.float64)
+        c1[6:,6:] = n_p.imag[-4:,-4:]
+        c2[6:,6:] = phi_p.real[-4:,-4:]
+        ax[0,0].imshow(c1, cmap=cmap_n, norm=norm_n)
+        ax[1,0].imshow(c2, cmap=cmap_phi, norm=norm_phi)
+
+        #extremum = np.max([np.max(np.abs(n_opp)),np.max(np.abs(phi_opp))]) 
         #norm = colors.SymLogNorm(10**1,vmin=-extremum, vmax=extremum) 
-        norm = colors.Normalize(vmin=-extremum, vmax=extremum)
-        ax[0,0].imshow(n_opp.real[:10,:10], cmap=cmap, norm=norm)
-        print(n_opp.real[:10,:10])
-        ax[0,0].set_ylabel("n")
-        r = ax[0,1].imshow(n_opp.imag[:10,:10], cmap=cmap, norm=norm)
-        print(n_opp.imag[:10,:10])
-        ax[1,0].imshow(phi_opp.real[:10,:10], cmap=cmap, norm=norm)
-        print(phi_opp.real[:10,:10])
-        ax[1,0].set_ylabel("phi")
-        ax[1,0].set_xlabel("real")
-        ax[1,1].imshow(phi_opp.imag[:10,:10], cmap=cmap, norm=norm)
-        print(phi_opp.imag[:10,:10])
-        ax[1,1].set_xlabel("imaginary")
+        #norm = colors.Normalize(vmin=-extremum, vmax=extremum)
+        #ax[0,0].imshow(n_opp.real[:10,:10], cmap=cmap, norm=norm)
+        #print(n_opp.real[:10,:10])
+        ax[0,0].set_ylabel("n-matrix", rotation=90, fontsize=14, labelpad=00)
+        n_opp_p = copy(n_opp)
+        phi_opp_p = copy(phi_opp)
+        zero_mask = np.abs(n_opp_p.imag) < 1e-5
+        n_opp_p.imag[zero_mask] = np.nan
+        zero_mask = np.abs(phi_opp_p.real) < 1e-5
+        phi_opp_p.real[zero_mask] = np.nan
+        rn = ax[0,1].imshow(n_opp_p.imag[:8,:8], cmap=cmap_n, norm=norm_n)
+        #print(n_opp.imag[:10,:10])
+        rp = ax[1,1].imshow(phi_opp_p.real[:8,:8], cmap=cmap_phi, norm=norm_phi)
+        #make dots
+        ax[0,1].plot(8,8,'o',color='black',markersize=2,alpha=0.5)
+        ax[0,1].plot(8.5,8.5,'o',color='black',markersize=2,alpha=0.5)
+        ax[0,1].plot(9,9,'o',color='black',markersize=2,alpha=0.5)
+        ax[1,1].plot(8,8,'o',color='black',markersize=2,alpha=0.5)
+        ax[1,1].plot(8.5,8.5,'o',color='black',markersize=2,alpha=0.5)
+        ax[1,1].plot(9,9,'o',color='black',markersize=2,alpha=0.5)
+        #print(phi_opp.real[:10,:10])
+        ax[1,0].set_ylabel(r"$\phi$-matrix", rotation=90,fontsize=14, labelpad=00)
+        #ax[1,0].set_xlabel("real")
+        #ax[1,1].imshow(phi_opp.imag[:10,:10], cmap=cmap, norm=norm)
+        #print(phi_opp.imag[:10,:10])
+        #ax[1,1].set_xlabel("imaginary")
+        ax[0,0].set_title(r"$\phi_i$ basis")
+        ax[0,1].set_title(r"Diagonal basis")
         #show cbar
-        cbar = plt.colorbar(r, ax=ax[0,1], orientation='vertical')
-        plt.savefig("n_phi.png")
+        cbar_n = plt.colorbar(rn, orientation='vertical',shrink=0.75)
+        cbar_phi = plt.colorbar(rp , orientation='vertical',shrink=0.75)
+        #take labels and edit them
+        def lbl_format(x):
+            if np.isclose(x,0):
+                return "0"
+            return rf"${round(x,1)}i$" 
+        ticks = [0,2.5,5,7.5,-2.5,-5,-7.5]
+        cbar_n.set_ticks(ticks)
+        cbar_n.ax.set_yticklabels([lbl_format(x) for x in ticks])
+        def lbl_format(x):
+            if np.isclose(x,0):
+                return "0"
+            return rf"${round(x,1)}$" 
+        ticks = [0,0.5,1,1.5,-0.5,-1,-1.5]
+        cbar_phi.set_ticks(ticks)
+        cbar_phi.ax.set_yticklabels([lbl_format(x) for x in ticks])
+
+        #remvove margins
+        
+        #manually make grids
+        for i in range(2):
+            for j in range(2):
+                ticks = []
+                for x in range(11):
+                    ax[i,j].axhline(x-0.5, color='black', linewidth=0.5, alpha=0.1)
+                    ax[i,j].axvline(x-0.5, color='black', linewidth=0.5, alpha=0.1)
+                    ticks.append(x-0.5)
+                ax[i,j].set_xticks(ticks)
+                ax[i,j].set_yticks(ticks)
+                #ax[i,j].set_xticklabels(["" for x in ticks])
+                #ax[i,j].set_yticklabels(["" for x in ticks])
+                    
+        #remove y ticks for the second column
+        """ax[0,1].set_yticks([])
+        ax[0,1].set_yticklabels([])
+        ax[1,1].set_yticks([])
+        ax[1,1].set_yticklabels([])
+        ax[0,1].set_xticks([])
+        ax[0,1].set_xticklabels([])"""
+        #make labels for ticks
+        ticks = [0.5,1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5]
+        #ax[1,1].set_xticks(ticks)
+        #labels = [f"|{int(x-0.5)}>" for i,x in enumerate(ticks) if i%2 == 0 else ""]
+        labels = [rf"    $|{int(x-0.5)}\rangle$" if i%2 == 0 and i < 8 else "" for i,x in enumerate(ticks)]
+        fz = 10
+        ax[1,1].set_xticklabels(labels,fontsize=fz)
+        ax[0,1].set_xticklabels(labels,fontsize=fz)
+        labels = ["".join(l.split(" ")[2:]) for l in labels]
+        ax[1,1].set_yticklabels(labels,fontsize=fz)
+        ax[0,1].set_yticklabels(labels,fontsize=fz)
+        labels = [rf"     $\phi_{int(x-0.5)}$" if i%3 == 0 else "" for i,x in enumerate(ticks[:4])]
+        #labels += [rf"     $\phi_{{N-{int(10-x-0.5)}}}$" if i%2 == 0 else "" for i,x in enumerate(ticks[4:])]
+        labels += [""]
+        labels += [""]
+        labels += [rf"          $\phi_{{N-3}}$"]
+        labels += [""]
+        labels += [""]
+        labels += [rf"      $\phi_{{N}}$"]
+        labels += [""]
+        fz += 0.8
+        ax[1,0].set_xticklabels(labels,fontsize=fz)
+        ax[0,0].set_xticklabels(labels,fontsize=fz)
+        labels = ["".join(l.split(" ")[2:]) for l in labels]
+        ax[1,0].set_yticklabels(labels,fontsize=fz)
+        ax[0,0].set_yticklabels(labels,fontsize=fz)
+        
+        #for label in ax.xaxis.get_majorticklabels():
+        #    label.set_transform(label.get_transform() + offset)
+        for label in ax[1,0].yaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.04, -0.06, fig.dpi_scale_trans))
+        for label in ax[0,0].yaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.04, -0.06, fig.dpi_scale_trans))
+        for label in ax[1,1].yaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.05, -0.06, fig.dpi_scale_trans))
+        for label in ax[0,1].yaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.05, -0.06, fig.dpi_scale_trans))
+        #and then for x
+        for label in ax[1,0].xaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.00, 0.05, fig.dpi_scale_trans))
+        for label in ax[1,1].xaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.00, 0.05, fig.dpi_scale_trans))
+        for label in ax[0,1].xaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.00, 0.05, fig.dpi_scale_trans))
+        for label in ax[0,0].xaxis.get_majorticklabels():
+            label.set_transform(label.get_transform() + matplotlib.transforms.ScaledTranslation(0.00, 0.05, fig.dpi_scale_trans))
+
+    
+
+        #plt.tight_layout(h_pad=0,w_pad=0, pad=0.0)
+        plt.subplots_adjust(wspace=0.0, hspace=0.0, top=1, bottom=0.0, left=0.0, right=1)
+        #set height of subplot 1,0
+        #ax[0,0].set_aspect('equal', adjustable='box',share=True)
+        #ax[1,0].set_aspect('equal', adjustable='box',share=True)
+        #ax[0,1].set_aspect('equal', adjustable='box',share=True)
+        #ax[1,1].set_aspect('equal', adjustable='box',share=True)
+        #plt.tight_layout()
+        #plt.savefig("matricies.png")
+        
+        plt.savefig("matricies.pdf")
         plt.show()
+        
         plt.clf()
         plt.close('all')
 
@@ -790,7 +960,7 @@ def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, ba
 
     for i,c in enumerate(c_ops):
         c = qt.Qobj(np.array(c))
-        c_ops[i] = qt.spre(c) - qt.spost(c)
+        c_ops[i] = c#qt.spre(c) - qt.spost(c)
 
     #print("H0: ",H0)
 

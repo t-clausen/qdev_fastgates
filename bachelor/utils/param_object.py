@@ -5,10 +5,13 @@ import sympy as sp
 from matplotlib import pyplot as plt
 
 config = {}
-with open("config.txt", "r") as f:
-    for line in f.readlines():
-        line = line.strip()
-        config[line.split(":")[0]] = eval(line.split(":")[1])
+try:
+    with open("config.txt", "r") as f:
+        for line in f.readlines():
+            line = line.strip()
+            config[line.split(":")[0]] = eval(line.split(":")[1])
+except FileNotFoundError:
+    config = {}
 
 def factor_matrix_function(matrix):
     variable = sp.symbols('t')
@@ -97,10 +100,17 @@ class GateParams:
 
         self.polarization = np.array(self.polarization).astype(np.complex128)
         print(self.polarization)
-        #carrier = lambda t: np.exp(-1j*self.omega_d*t)*self.polarization
+        #carrier = lambda t: np.exp(1j*self.omega_d*t)*self.polarization
         #self.function = lambda t: np.sum([(self.envelope(t)*carrier(t))[i]*np.array([self.n_opp, self.phi_opp])[i] for i in range(2)], axis=0)
-
-        carrier = lambda t: np.exp(-1j*self.omega_d*t)
+        omega_d=self.omega_d
+        if isinstance(omega_d, sp.Basic):
+            omega_d = omega_d.subs(sp.Symbol('omega_{01}'), self.H0_bare[1,1]-self.H0_bare[0,0])
+            omega_d = omega_d.subs(sp.Symbol('omega_{12}'), self.H0_bare[2,2]-self.H0_bare[1,1])
+            omega_d = omega_d.subs(sp.Symbol('phi_{12}'), self.phi_opp[1,2])
+            omega_d = omega_d.evalf()
+            #take the real part
+            omega_d = omega_d.as_real_imag()[0]
+        carrier = lambda t: np.exp(1j*omega_d*t)
         carrier_inphase = lambda t: carrier(t)
         carrier_quad = lambda t: carrier(t)*np.exp(-1j*sp.pi/2)
         scaling = 1
@@ -111,11 +121,50 @@ class GateParams:
             else:
                 scaling = float(self.Omega_amp)
         if hasattr(self, 'lambda_amp'):
-            lambda_ = float(self.lambda_amp)
-        if hasattr(self, 'envelope'):
+            if isinstance(self.lambda_amp, sp.Basic):
+                lambda_ = self.lambda_amp
+            else:
+                lambda_ = float(self.lambda_amp)
+        if hasattr(self, 'envelope_coffs'):
+            c_arr = np.array(self.envelope_coffs)
+            t_0 = sp.Symbol('t_0')
+            t_g = sp.Symbol('t_g')
+            t = sp.Symbol('t')
+            carrier = sp.exp(1j*self.omega_d*t)
+            env_func = sp.Piecewise(
+                (sum([
+                    c_arr[i]*(1-sp.cos(2*(i+1)*sp.pi*(t-t_0)/t_g)) for i in range(len(c_arr))
+                ]), (t>=t_0) & (t<=t_g+t_0)),
+                (0, True)
+            )
+            """X = np.linspace(0, 5, 100)
+            Y = np.array([env_func.subs({t: x, t_0: 0, t_g: 5}) for x in X], dtype=np.complex128)
+            plt.plot(X, Y.real)
+            plt.savefig("temp/envelope.png")
+            plt.clf()
+            plt.close('all')"""
+            """sum([
+                c_arr[i]*(1-sp.cos((i+1)*np.pi*(t-t_0)/t_g)) for i in range(len(c_arr))
+            ])"""
+            self.function = env_func*carrier
+            if isinstance(self.envelope_inphase, sp.Piecewise):
+                ts = sp.Symbol('t')
+                carrier_inphase = sp.exp(1j*self.omega_d*ts)
+                #plot carrier_inphase
+                carrier_quad = sp.exp(1j*self.omega_d*ts)*sp.exp(-1j*sp.pi/2)    
+                if hasattr(self, 'Omega_amp'):  
+                    Oa = self.Omega_amp
+                else:
+                    Oa = 1
+                env_inphase = self.envelope_inphase.subs(sp.Symbol("Omega"), Oa)
+                env_quad = self.envelope_quad.subs(sp.Symbol("Omega"), Oa)
+                
+                self.function = env_inphase*carrier_inphase + env_quad*carrier_quad
+            
+        elif hasattr(self, 'envelope'):
             if isinstance(self.envelope, sp.Piecewise):
                 ts = sp.Symbol('t')
-                carrier = sp.exp(-1j*self.omega_d*ts)
+                carrier = sp.exp(1j*self.omega_d*ts)
                 self.function = self.envelope*carrier*scaling
                 #self.function = self.function.subs(sp.Symbol('omega_{01}'), self.H0_bare[1,1]-self.H0_bare[0,0])
             else:
@@ -123,23 +172,28 @@ class GateParams:
         elif hasattr(self, 'envelope_inphase') and hasattr(self, 'envelope_quad'):
             if isinstance(self.envelope_inphase, sp.Piecewise):
                 ts = sp.Symbol('t')
-                carrier_inphase = sp.exp(-1j*self.omega_d*ts)
+                carrier_inphase = sp.exp(1j*self.omega_d*ts)
                 #plot carrier_inphase
                 """cip_dummy = sp.lambdify(sp.Symbol("t"),carrier_inphase.subs(sp.Symbol("omega_{01}"), 1), modules=["numpy"])
                 plt.plot(np.linspace(0, 10, 100), [cip_dummy(t) for t in np.linspace(0, 10, 100)])
                 plt.savefig("temp/1.png")
                 plt.clf()"""
-                carrier_quad = sp.exp(-1j*self.omega_d*ts)*sp.exp(-1j*sp.pi/2)
+                carrier_quad = sp.exp(1j*self.omega_d*ts)*sp.exp(-1j*sp.pi/2)
                 """cq_dummy = sp.lambdify(sp.Symbol("t"),carrier_quad.subs(sp.Symbol("omega_{01}"), 1), modules=["numpy"])
                 plt.plot(np.linspace(0, 10, 100), [cq_dummy(t) for t in np.linspace(0, 10, 100)])
                 plt.savefig("temp/2.png")
                 plt.clf()"""
-                env_inphase = self.envelope_inphase.subs(sp.Symbol("Omega"), self.Omega_amp).subs(sp.Symbol("lambda"), self.lambda_amp)
+                env_inphase = self.envelope_inphase.subs(sp.Symbol("Omega"), self.Omega_amp)
+                if hasattr(self, 'lambda_amp'):
+                    env_inphase = self.envelope_inphase.subs(sp.Symbol("lambda"), self.lambda_amp)
+
                 """envip_dummy = sp.lambdify(sp.Symbol("t"),env_inphase.subs(sp.Symbol("t_0"), 0).subs(sp.Symbol("t_g"), 5), modules=["numpy"])
                 plt.plot(np.linspace(0, 10, 100), [envip_dummy(t) for t in np.linspace(0, 10, 100)])
                 plt.savefig("temp/3.png")
                 plt.clf()"""
-                env_quad = self.envelope_quad.subs(sp.Symbol("Omega"), self.Omega_amp).subs(sp.Symbol("lambda"), self.lambda_amp)
+                env_quad = self.envelope_quad.subs(sp.Symbol("Omega"), self.Omega_amp)
+                if hasattr(self, 'lambda_amp'):
+                    env_quad = self.envelope_quad.subs(sp.Symbol("lambda"), self.lambda_amp)
                 """envq_dummy = sp.lambdify(sp.Symbol("t"),env_quad.subs(sp.Symbol("t_0"), 0).subs(sp.Symbol("t_g"), 5), modules=["numpy"])
                 plt.plot(np.linspace(0, 10, 100), [envq_dummy(t) for t in np.linspace(0, 10, 100)])
                 plt.savefig("temp/4.png")
@@ -161,15 +215,19 @@ class GateParams:
         
         return self
 
-    def transform_2_rotating_frame(self,t_g,omega_01,t0=None,n=None,dt0=None):
+    def transform_2_rotating_frame(self,t_g,omega_01,omega_12,t0=None,n=None,dt0=None):
         #attempt 2, this time simpler
+        def me_ii(i):
+            me = np.zeros((len(self.H0.full()),len(self.H0.full())),dtype=np.complex128)
+            me[i,i] = 1
+            return me
         me_11 = np.zeros((len(self.H0.full()),len(self.H0.full())),dtype=np.complex128)
         me_00 = np.zeros((len(self.H0.full()),len(self.H0.full())),dtype=np.complex128)
         me_I = np.eye(len(self.H0.full()))
         me_00[0,0], me_11[1,1] = 1, 1
         #me_00, me_11, me_I = qt.Qobj(me_00), qt.Qobj(me_11), qt.Qobj(me_I)
-        unitary = lambda t: (np.exp(1j*omega_01*t))*me_11 + me_00
-        i_unitary = lambda t: (np.exp(-1j*omega_01*t))*me_11 + me_00
+        unitary = lambda t: np.prod([(np.exp(1j*H0[i,i]*t)-1)*me_ii(i) + me_I for i in range(len(self.H0.full()))], axis=0)
+        i_unitary = lambda t: np.prod([(np.exp(-1j*H0[i,i]*t)-1)*me_ii(i) + me_I for i in range(len(self.H0.full()))], axis=0)
 
         #then construct the H0 and HI
         if not hasattr(self, 'funcbuffer'):
@@ -182,13 +240,23 @@ class GateParams:
             t0s = sp.Symbol('t_0')
             t_gs = sp.Symbol('t_g')
             omega_01s = sp.Symbol('omega_{01}')
+            omega_12s = sp.Symbol('omega_{12}')
+            phi_12s = sp.Symbol('phi_{12}')
             func = self.function
+            if sp.Symbol('Omega') in func.free_symbols:
+                func = func.subs(sp.Symbol('Omega'), self.Omega_amp)
             if t0 != None: func = func.subs(t0s, t0)
-            if n != None: func = func.subs(sp.Symbol('n'), 2*n)
+            if n != None: func = func.subs(sp.Symbol('n'), n)
             func = func.subs(t_gs, t_g)
             func = func.subs(omega_01s, omega_01)
+            func = func.subs(omega_12s, omega_12)
+            func = func.subs(phi_12s, self.phi_opp[1,2])
+            if hasattr(self,'envelope_coffs'):
+                for i in range(len(self.envelope_coffs)):
+                    func = func.subs(sp.Symbol(f'c_{i+1}'), self.envelope_coffs[i])
             if dt0 != None:
                 func = func.subs(sp.Symbol('dt_0'), dt0)
+            func = func.evalf()
             #func = self.function.subs({self.t_0: t0})
             #convert to numpy piecewise
             func = sp.lambdify(ts, func, modules=["numpy"])
@@ -222,12 +290,15 @@ class GateParams:
         H0 = self.H0.full()
         H_evol = lambda t: H0 + func1(t) + func2(t)
         #plot this
-        #T = np.linspace(0, 20, 100)
-        #r = [H_evol(t).full()[0][1].real for t in T]
-        #i = [H_evol(t).full()[0][1].imag for t in T]
-        #r2 = [H_evol(t).full()[1][0].real for t in T]
-        #i2 = [H_evol(t).full()[1][0].imag for t in T]
-        """plt.plot(T, r)
+        """if n != None:
+            T = np.linspace(dt0+(n*np.pi/omega_01)-10, dt0+(n*np.pi/omega_01)+t_g+10, 200)
+        else:
+            T = np.linspace(t0, t0+t_g, 200)
+        r = [H_evol(t)[0][1].real for t in T]
+        i = [H_evol(t)[0][1].imag for t in T]
+        r2 = [H_evol(t)[1][0].real for t in T]
+        i2 = [H_evol(t)[1][0].imag for t in T]
+        plt.plot(T, r)
         plt.plot(T, i)
         plt.plot(T, r2)
         plt.plot(T, i2)
@@ -237,7 +308,7 @@ class GateParams:
 
 
         #then, finally, do the transformation
-        time_part = -omega_01*me_11
+        time_part = -H0
         #H_transformed = lambda t: unitary(t)*H_evol(t)*i_unitary(t) + time_part
         def H_transformed(t):
             v = unitary(t)@H_evol(t)@i_unitary(t)
@@ -247,12 +318,19 @@ class GateParams:
             t = np.random.uniform(0,2*np.pi)
             mat[0][1] += r*np.exp(1j*t)
             mat[1][0] += r*np.exp(-1j*t)
-            if config["H_log"]:
+            if "H_log" in config and config["H_log"]:
                 #matf = mat.full()
                 with open("temp/H_log.txt", "a") as f:
                     f.write(f"{t}; {mat[0][1]}\n")
                 with open("temp/H_log11.txt", "a") as f:
                     f.write(f"{t}; {mat[1][1]-mat[0][0]}\n")
+            """if isinstance(mat, sp.Basic):
+                mat = mat.evalf()
+            for i in range(len(mat)):
+                for j in range(len(mat)):
+                    if isinstance(mat[i][j], sp.Basic):
+                        mat[i][j] = complex(mat[i][j].evalf())
+            mat = mat.astype(np.complex128)"""
             return qt.Qobj(mat)
         #T = np.linspace(0, 20, 100)
         #r = [H_transformed(t).full()[0][1].real for t in T]
