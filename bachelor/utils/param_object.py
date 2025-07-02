@@ -46,7 +46,14 @@ class GateParams:
         for key in keys:
             if key.startswith("calibrate_"):
                 if "_VZ" in key:
-                    if self.__dict__[key] == True:
+                    if "_VZ1" in key or "_VZ2" in key:
+                        if self.__dict__[key] == True:
+                            self.VZ_amp = [0,0]
+                            if "VZ1" in key:
+                                self.is_calibrated["VZ1"] = False
+                            elif "VZ2" in key:
+                                self.is_calibrated["VZ2"] = False
+                    elif self.__dict__[key] == True:
                         self.VZ_amp = 0
                         self.VZ_amp_buffer = []
                         self.VZ = [[1,0],[0,1]]
@@ -105,8 +112,9 @@ class GateParams:
         omega_d=self.omega_d
         if isinstance(omega_d, sp.Basic):
             omega_d = omega_d.subs(sp.Symbol('omega_{01}'), self.H0_bare[1,1]-self.H0_bare[0,0])
-            omega_d = omega_d.subs(sp.Symbol('omega_{12}'), self.H0_bare[2,2]-self.H0_bare[1,1])
-            omega_d = omega_d.subs(sp.Symbol('phi_{12}'), self.phi_opp[1,2])
+            if len(self.H0_bare) > 2:
+                omega_d = omega_d.subs(sp.Symbol('omega_{12}'), self.H0_bare[2,2]-self.H0_bare[1,1])
+                omega_d = omega_d.subs(sp.Symbol('phi_{12}'), self.phi_opp[1,2])
             omega_d = omega_d.evalf()
             #take the real part
             omega_d = omega_d.as_real_imag()[0]
@@ -245,12 +253,16 @@ class GateParams:
             func = self.function
             if sp.Symbol('Omega') in func.free_symbols:
                 func = func.subs(sp.Symbol('Omega'), self.Omega_amp)
-            if t0 != None: func = func.subs(t0s, t0)
+            if t0 != None and t0 != np.nan: func = func.subs(t0s, t0)
             if n != None: func = func.subs(sp.Symbol('n'), n)
             func = func.subs(t_gs, t_g)
             func = func.subs(omega_01s, omega_01)
-            func = func.subs(omega_12s, omega_12)
-            func = func.subs(phi_12s, self.phi_opp[1,2])
+            if len(self.H0_bare) > 2:
+                func = func.subs(omega_12s, omega_12)
+                func = func.subs(phi_12s, self.phi_opp[1,2])
+            else:
+                func = func.subs(omega_12s, np.inf)
+                func = func.subs(phi_12s, 0)
             if hasattr(self,'envelope_coffs'):
                 for i in range(len(self.envelope_coffs)):
                     func = func.subs(sp.Symbol(f'c_{i+1}'), self.envelope_coffs[i])

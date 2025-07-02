@@ -184,3 +184,4 @@ cython_debug/
 *.run
 *.pin
 *.dummy
+*.mp4

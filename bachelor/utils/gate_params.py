@@ -10,7 +10,10 @@ def compute_inv(args):
     omega_12 = args["omega_12"]
     omega_23 = args["omega_23"]
     phi_opp = args["phi_opp"]
-    phi_12 = phi_opp[1,2]
+    if len(phi_opp) > 2:
+        phi_12 = phi_opp[1,2]
+    else:
+        phi_12 = 0
     #doB = args["doB"]
     N = args["N"]
     try:
@@ -322,7 +325,61 @@ def get_gate_params(gate="demo"):
             #    [0.5+0.5j,1/np.sqrt(2)]
             #]
         })
-    elif "commensurate_x_virt_z" in gate:
+    elif "commensurate_x_virt_z_new" in gate:
+        #Pi*(-a^2*omega^2 + Pi^2)*omega/(-2*a^3*omega^3 + 2*Pi^2*a*omega + 2*Pi^2*sin(omega*a))
+        theta_a = 0
+        theta_b = 0#from resonant pulse condition
+        dt_0_init = -0.5*sp.Symbol('t_g')#!temp
+        dt_0 = sp.Symbol('dt_0')
+        t_g = sp.Symbol('t_g')
+        #varphi = 0
+        omega_d = sp.Symbol('omega_{01}')
+        nt_0 = sp.Symbol('n')*np.pi/omega_d
+        t_0 = nt_0+dt_0
+        #tm = sp.Symbol('t_m')
+        #t = tm+t_0+0.5*t_g
+        t = sp.Symbol('t')
+        tm = t-t_0-0.5*t_g
+        calibrate_Omega = True
+        calibrate_dt0 = True
+        #Omega_eq= np.pi*(-t_g**2*omega_d**2 + np.pi**2)*omega_d/(-2*t_g**3*omega_d**3 + 2*np.pi**2*t_g*omega_d + 2*np.pi**2*sp.sin(omega_d*t_g))*4#maple formula
+        Omega_eq = 3.25*(-4*np.pi**2*t_g**2*omega_d**3 + np.pi**4*omega_d)/((8*1j*omega_d**2*t_g**2*np.pi - 2*1j*np.pi**3 + 4*np.pi**2*t_g*omega_d)*sp.exp(2*1j*omega_d*(dt_0 + t_g)) + (-8*1j*omega_d**2*t_g**2*np.pi + 2*1j*np.pi**3 + 4*np.pi**2*t_g*omega_d)*sp.exp(2*1j*omega_d*dt_0) + 4*omega_d*t_g*(np.pi + 2)*(-2*t_g*omega_d + np.pi)*(2*t_g*omega_d + np.pi))#maple formula
+        dt0_eq = -0.5*t_g
+        dt0_eq = None
+        name = "commensurate_x_virt_z"
+        if "nooptim" in gate:
+            calibrate_Omega = False
+            calibrate_dt0 = True
+            name += "_nooptim"
+
+        envelope = sp.Piecewise((2*(sp.cos(sp.pi*tm/t_g)**2), (tm>=-0.5*t_g) & (tm<=0.5*t_g)), (0,True))
+
+        return po.GateParams({
+            "omega_d": omega_d,
+            "known_t0": True,
+            "calibrate_Omega": calibrate_Omega,
+            "calibrate_dt0": calibrate_dt0,
+            "initial_dt0": dt_0_init,
+            "initial_Omega": Omega_eq,
+            "calibrate_VZ1": False,
+            "calibrate_VZ2": True,
+            "name": name,
+            "Omega_eq": Omega_eq,
+            "dt0_eq": dt0_eq,
+            "t_0": t_0,
+            "polarization": (np.cos(theta_a), np.sin(theta_a)*np.exp(-1j*theta_b)),
+            "envelope": envelope,
+            #"carrier": sp.cos(omega_d*t),
+            "ideal": [[1/np.sqrt(2),-1j/np.sqrt(2)],[-1j/np.sqrt(2),1/np.sqrt(2)]],#x gate
+            "t_g": t_g,
+            "c_ops": [
+                #np.array([[0,158],[0,0]]),
+                np.array([[0,0],[0,0]]),
+                #np.array([[0,1],[0,0]])
+                np.array([[0,0],[0,0]])
+            ]
+        })
+    elif "commensurate_x_virt_z" in gate and "new" not in gate:
         #Pi*(-a^2*omega^2 + Pi^2)*omega/(-2*a^3*omega^3 + 2*Pi^2*a*omega + 2*Pi^2*sin(omega*a))
         theta_a = 0
         theta_b = 0#from resonant pulse condition
@@ -377,7 +434,7 @@ def get_gate_params(gate="demo"):
             ]
         })
     elif "FAST-MAGNUS" in gate and "DRAG" not in gate:
-        N=10
+        N=3
         c_arr = [sp.Symbol(f'c_{n}') for n in range(1, N+1)]
         t = sp.Symbol('t')
         t_0 = sp.Symbol('t_0')
@@ -469,6 +526,7 @@ def get_gate_params(gate="demo"):
                 ),
                 (t>=t_0) & (t<=t_g+t_0))
             , (0,True))
+        
         envelope_quad = -0.5*sp.diff(envelope_inphase, t)*phi_12/alpha #the derivative of the in-phase envelope
         omega_d = omega_01-(3*(sp.pi**2))*(phi_12**2-2*phi_12)/(128*alpha*(t_g**2))#from the RWA condition
         theta_a = 0
@@ -519,6 +577,100 @@ def get_gate_params(gate="demo"):
             "gn_func": gn_func,
             "gm_func": gm_func,
             "doB": True,
+            "name": gate,
+            "polarization": (np.cos(theta_a), np.sin(theta_a)*np.exp(-1j*theta_b)),
+            "envelope_inphase": envelope_inphase,
+            "envelope_quad": envelope_quad,
+            "envelope_coffs": c_arr,
+            #"carrier": sp.cos(omega_d*t),
+            "ideal": [[1/np.sqrt(2),-1j/np.sqrt(2)],[-1j/np.sqrt(2),1/np.sqrt(2)]],#x gate
+            "t_g": t_g,
+            "forbidden_intervals": forbidden_intervals,
+            "c_ops": [
+                np.array([[0,158],[0,0]]),
+                np.array([[0,1],[0,0]])
+            ]
+        })
+    elif "FAST-MAGNUS-MAGNUS" in gate:
+        N=3
+        c_arr = [sp.Symbol(f'c_{n}') for n in range(1, N+1)]
+        t = sp.Symbol('t')
+        t_0 = sp.Symbol('t_0')
+        t_g = sp.Symbol('t_g')
+        omega_01 = sp.Symbol('omega_{01}')
+        alpha = sp.Symbol('omega_{12}')-omega_01#anharmonicity
+        phi_12 = sp.Symbol('phi_{12}')#matrix element of the 1->2 transition
+        envelope_inphase = sp.Piecewise(
+            (
+                sum(
+                    [c_arr[i-1] * (1-sp.cos(2*sp.pi*i*(t-t_0)/t_g)) for i in range(1, N+1)]
+                ),
+                (t>=t_0) & (t<=t_g+t_0))
+            , (0,True))
+        t_c = sp.pi/omega_d
+        lambda_ = sp.Symbol('lambda')
+        Lambda = t_g/(2*np.pi/sp.Symbol('omega_{01}'))
+        N_c = sp.ceiling(t_g/t_c)
+        #lambda_initial = 2*np.pi*(N_c)/t_g
+        lambda_initial = sp.Piecewise(
+            (2*np.pi*(t_g/t_c)/t_g, Lambda < 1),
+            (2*np.pi*(N_c)/t_g, Lambda >= 1)
+        )
+        envelope_quad = -(lambda_**-1)*sp.diff(envelope_inphase, t) #the derivative of the in-phase envelope
+        
+        omega_d = omega_01#-(3*(sp.pi**2))*(phi_12**2-2*phi_12)/(128*alpha*(t_g**2))#from the RWA condition
+        theta_a = 0
+        theta_b = 0
+        calibrate_Omega = True
+        Omega_eq = None
+        n,m = sp.symbols('n'), sp.symbols('m')
+        n = sp.Symbol('n')
+        m = sp.Symbol('m')
+        
+        F_x = sum(
+            [c_arr[i-1]*c_arr[j-1] * (
+                B_matrix_func(i, j, omega_d=omega_d, t_g=t_g)
+            ) for i in range(1, N+1) for j in range(1, N+1)]
+        )
+        F_y = F_x
+        cond_eq = sp.pi/4-t_g*sum(c_arr)
+        omega_0 = 0
+        omega_12 = sp.Symbol('omega_{12}')
+        omega_02 = omega_01 + omega_12
+        omega_03 = sp.Symbol('omega_{23}') + omega_12 + omega_01
+        forbidden_intervals = [
+            [(omega_02-omega_0)*0.99/(2*np.pi), (omega_02-omega_0)*1.01/(2*np.pi)],#the 0->2 transition
+            #[(omega_12+omega_01)*0.5/(2*np.pi)-(omega_12-omega_01)/(2*np.pi),(omega_12+omega_01)*0.5/(2*np.pi)],# the 1->2 transition
+            [0.99*omega_12/(2*np.pi),1.01*omega_12/(2*np.pi)],# the 1->2 transition
+            [(omega_02+omega_01)/(2*np.pi),np.inf],# energy cutoff
+        ]
+        fs = sp.Symbol('f')
+
+
+        gn_func = t_g*(
+            sp.exp(-1j*sp.pi*t_g*fs)*sp.sinc(sp.pi*t_g*fs)
+            -0.5*sp.exp(1j*sp.pi*(n/t_g-fs)*t_g)*sp.sinc(sp.pi*(n/t_g-fs)*t_g)
+            -0.5*sp.exp(-1j*sp.pi*(n/t_g+fs)*t_g)*sp.sinc(sp.pi*(n/t_g+fs)*t_g)
+        )
+        gm_func = gn_func.subs(n, m)
+
+            
+        #Lagrangian = lambda: K_func() + F_x + F_y + cond_eq
+        #Lagrangian = sp.simplify(Lagrangian)
+
+        calibrate_lambda = False
+        return po.GateParams({
+            "omega_d": omega_d,
+            "known_t0": False,
+            "get_matrix_inverse": True,
+            "matrix_inverse": compute_inv,
+            "calibrate_VZ": True,
+            "gn_func": gn_func,
+            "gm_func": gm_func,
+            "doB": True,
+            "calibrate_lambda": calibrate_lambda,
+            "initial_lambda": lambda_initial,
+            "lambda_eq": lambda_initial,
             "name": gate,
             "polarization": (np.cos(theta_a), np.sin(theta_a)*np.exp(-1j*theta_b)),
             "envelope_inphase": envelope_inphase,

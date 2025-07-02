@@ -19,6 +19,7 @@ axs = None
 fig = None
 bloch = None
 k = 0
+from qiskit.visualization import plot_bloch_vector
 def evaluate(results,ideal_gate,light=False):#!validate
     global dotplotinited, axs, fig, bloch, k
     """
@@ -38,11 +39,11 @@ def evaluate(results,ideal_gate,light=False):#!validate
     sx, sy, sz = np.zeros((base_len,base_len),dtype=complex), np.zeros((base_len,base_len),dtype=complex), np.zeros((base_len,base_len),dtype=complex)
     sx[:2,:2], sy[:2,:2], sz[:2,:2] = sx_.full(), sy_.full(), sz_.full()
 
-    dotbloch = False
+    dotbloch = True
     if dotbloch and (not dotplotinited or not is_figure_active()):
-        #fig,axs = plt.subplots(1,2,figsize=(6,4))
-        fig = plt.figure(figsize=(6,2), dpi=600)
-        axs = [fig.add_subplot(131),fig.add_subplot(132, projection='3d'),fig.add_subplot(133)]
+        fig,axs = plt.subplots(1,3,figsize=(4.78,1.8), dpi=600,gridspec_kw={'width_ratios': [0.9,0.6,0.8]})
+        #fig = plt.figure(figsize=(6,2), dpi=600, 
+        #axs = [fig.add_subplot(131),fig.add_subplot(132),fig.add_subplot(133)]
         dummyax = fig.add_subplot(111, frame_on=False)
         dummyax.set_xticks([])
         dummyax.set_yticks([])
@@ -50,10 +51,15 @@ def evaluate(results,ideal_gate,light=False):#!validate
         #axs[0].set_aspect(2)
         #axs[1].set_aspect(2)
         #axs[2].set_aspect(2)
-        dummyax.annotate(rf"$X_{{\pi/2}}$ by RWA pulse parameters, $t_g=1$", xy=(0.3, 1.2), ha='center', va='center', fontsize=12, xycoords='axes fraction')
+        dummyax.annotate(rf"$X_{{\pi/2}}$ by RWA pulse parameters, $t_g/\tau=1$", xy=(0.3, 1.2), ha='center', va='center', fontsize=9.5, xycoords='axes fraction')
         #dummyax.annotate(rf"$X_{{\pi/2}}$ by RWA pulse parameters, $t_g=1$", xy=(0.3, 1.15), ha='center', va='center', fontsize=12, xycoords='axes fraction')
-        axs[2].set_title(rf"Infidelity vs. $t_g$", fontsize=12, y=1.07)
-        bloch = qt.Bloch(axes=axs[1])
+        axs[2].set_title(rf"Infidelity vs. $t_g/\tau$", fontsize=9.5, y=1.07,x=0.55)
+        axs[1].axis('off')
+        ax3 = plt.axes([0.2,0.16,0.62,0.5], facecolor=(1,1,1,0), projection='3d')
+        bloch = qt.Bloch(axes=ax3)
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+        ax3.set_zticks([])
         dotplotinited = True
         k = 0
 
@@ -87,16 +93,16 @@ def evaluate(results,ideal_gate,light=False):#!validate
                 fx = np.trace(np.dot(sx,final_state.full()))
                 fy = np.trace(np.dot(sy,final_state.full()))
                 fz = np.trace(np.dot(sz,final_state.full()))
-                bloch.add_points([fx,fy,fz],meth="s",colors="red",alpha=0.5)
-                bloch.add_points([exp_x[-1],exp_y[-1],exp_z[-1]],meth="s",colors="orange",alpha=0.5)
+                bloch.add_points([fx,fy,fz],meth="s",colors="red",alpha=0.1)
+                bloch.add_points([exp_x[-1],exp_y[-1],exp_z[-1]],meth="s",colors="orange",alpha=0.1)
                 nlx = np.trace(np.dot(sx,nextlast_state.full()))
                 nly = np.trace(np.dot(sy,nextlast_state.full()))
                 nlz = np.trace(np.dot(sz,nextlast_state.full()))
-                bloch.add_points([nlx,nly,nlz],meth="s",colors="green",alpha=0.5)
+                bloch.add_points([nlx,nly,nlz],meth="s",colors="green",alpha=0.1)
                 bloch.show()
                 ax[1].set_xlabel("Timesteps")
-                ax[1].set_ylabel("Expectation value")
-                ax[1].legend()
+                ax[1].set_ylabel("Expectation value", fontsize=10)
+                ax[1].legend(fontsize=8, frameon=False)
                 #bloch.legend()
                 ax[0].set_xticks([0,150])#!tbd
                 ax[0].set_xticklabels([r"$t_0$",r"$t_0+t_g$"])
@@ -143,16 +149,23 @@ def evaluate(results,ideal_gate,light=False):#!validate
             nlx = np.trace(np.dot(sx,nextlast_state.full()))
             nly = np.trace(np.dot(sy,nextlast_state.full()))
             nlz = np.trace(np.dot(sz,nextlast_state.full()))
-            bloch.add_points([nlx,nly,nlz],meth="s",colors="green")
+            #bloch.add_points([nlx,nly,nlz],meth="s",colors="green")
 
-            axs[0].set_xlabel("Timesteps")
-            axs[0].set_ylabel("Expectation value")
-            axs[0].legend(fontsize=8, frameon=False)
+            axs[0].set_xlabel("Time", fontsize=9, labelpad=0)
+            axs[0].set_ylabel("Expectation value", fontsize=9)
+            axs[0].set_yticks([0,0.5,1])
+            axs[0].set_yticklabels([r"$0$",r"$1/2$",r"$1$"], fontsize=9)
+            axs[0].legend(fontsize=7, frameon=False, bbox_to_anchor=(0.5, 0.5, 0.5, 0.5))
+            endoff = 0.05*len(result.states)
+            xticks = [endoff, len(result.states)-endoff]
+            xticklabels = [r"$t_0$", r"$t_0+t_g$"]
+            axs[0].set_xticks(xticks)
+            axs[0].set_xticklabels(xticklabels, fontsize=9)
             #remove grid on bloch
             bloch.frame_alpha = 0
             bloch.frame_width = 1
             bloch.point_size = [20,20,20,20]
-            bloch.font_size = 12
+            bloch.font_size = 9
             bloch.xlabel = ["$|x\\rangle$",""]
             bloch.ylabel = ["$|y\\rangle$",""]
             bloch.zlabel = ["$|0\\rangle$","$|1\\rangle$"]
@@ -175,7 +188,8 @@ def evaluate(results,ideal_gate,light=False):#!validate
             ax[1] = set_wh(axs[1],2,2)"""
             
             if k >= 10:
-                bloch.show()
+                #bloch.show()
+                pass
             #plt.savefig("bloch.png")
             
             

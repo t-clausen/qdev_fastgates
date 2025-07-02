@@ -286,6 +286,8 @@ from copy import deepcopy as copy
 import qutip as qt
 #import qutip_cupy
 def get_simple_gate(unitvec,theta,baselen=2):
+    if theta == 0:
+        return qt.qeye(baselen)
     sx, sy, sz = qt.sigmax().full(), qt.sigmay().full(), qt.sigmaz().full()
     unitvec = np.array(unitvec)/np.linalg.norm(unitvec)
     unitary = np.eye(2,2,dtype=complex)*np.cos(theta/2)
@@ -402,9 +404,15 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
             #instead of the above, minimize the avg fidelity over all results
             a_s = []
             theta_cords = []
-            def score_at_Zamp(Zamps):
-                Z_double = Zamps[0]
-                Z_single = Zamps[1]
+            def score_at_Zamp(Zamps,cal):
+                if cal[0]:
+                    Z_double = Zamps[0]
+                else:
+                    Z_double = 0
+                if cal[1]:
+                    Z_single = Zamps[1]
+                else:
+                    Z_single = 0
                 unitary_d = get_simple_gate([0,0,1], Z_double, baselen=len(start_states[0].full()))
                 unitary_d_inv = get_simple_gate([0,0,1], -Z_double, baselen=len(start_states[0].full()))
                 unitary_s = get_simple_gate([0,0,1], Z_single, baselen=len(start_states[0].full()))
@@ -446,13 +454,23 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                 if a <= -7:
                     raise StopIteration("Target fidelity reached")
                 return a
+            cal = [True,True]
+            if "VZ2" not in gate_params.is_calibrated.keys():
+                cal[1] = False
+                if "VZ1" not in gate_params.is_calibrated.keys():
+                    cal[1] = True
+            elif "VZ1" not in gate_params.is_calibrated.keys():
+                cal[0] = False
             try:
-                r = minimize(score_at_Zamp, (0,0), method="Nelder-Mead")
+                r = minimize(score_at_Zamp, (0,0), method="Nelder-Mead",args=cal)
                 val_best = r.x
             except StopIteration as e:
                 print(e)
                 indx_best = np.argmin(a_s)
                 val_best = theta_cords[indx_best]
+            val_best = np.array(val_best)
+            if not cal[0]: val_best[0] = 0
+            if not cal[1]: val_best[1] = 0
 
             Z_amps.append(val_best)
         if calZ:
@@ -780,7 +798,7 @@ def two_param(gate_params, qubit, gate, do_VZ=False):
         val = complex(initial)
         initial_values[i] = float(val.real)
         if "Omega" in key:
-            bounds.append((0.75*val.real,1.25*val.real))
+            bounds.append((0.5*val.real,1.5*val.real))
             periodicity.append(None)
         elif "dt0" in key:
             periodicity.append(np.pi/qubit["omega_01_actual"])

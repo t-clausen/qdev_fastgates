@@ -684,7 +684,8 @@ def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, ba
     else: periodic = False
     
     H0_diag, eigenvecs, basisTransform, eigenvals, new_ex, new_size, Ec, El, Ej = get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex, base_size,expansion_order, truncation=truncation,periodic=periodic,optim=optimizebasis,Ec_IC=Ec_IC, El_IC=El_IC, Ej_IC=Ej_IC,force_size=force_size)
-    
+    if c_ops is None:
+        c_ops = []
     for i in range(len(c_ops)):
         if type(c_ops[i]) == str:
             c_ops[i] = eval(c_ops[i].replace("H0","H0_diag").replace("n_opp","n_opp").replace("phi_opp","phi_opp").replace("basisTransform","basisTransform"))

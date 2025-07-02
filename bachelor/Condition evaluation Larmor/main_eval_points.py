@@ -25,19 +25,21 @@ gate_names_2_eval = [#actual values are hidden off in the other file
     "RWA_x_nooptim",
     #"FAST-DRAG",
     #"FAST-MAGNUS-DRAG",
+    #"FAST-MAGNUS-MAGNUS",
     
     #"commensurate_x_virt_z",
+    #"commensurate_x_virt_z_new",
     #"corotating_xy_virt_z_nooptim",
     
 
-    #"FAST_nooptim",
+    
     
     
     #"magnus1_x_virt_z_nooptim",
 
     #"corotating_xy_virt_z",#!dont use this one
     
-    
+    #"FAST_nooptim",
 
     
     #"magnus1_x_virt_z",#!dont use this one
@@ -87,7 +89,8 @@ def main():
     
     while True:
         for t in range(2,6):
-            alphas = np.logspace(np.log10(0.01), np.log10(20), 50)
+            alphas = np.logspace(np.log10(0.019), np.log10(20), 50)
+            #alphas = np.logspace(np.log10(1), np.log10(20), 50)
             shuffle(alphas)
             #for alpha in np.logspace(np.log10(0.01), np.log10(20), 20):
             for alpha in alphas:
@@ -120,7 +123,13 @@ def main():
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 0.25, alpha, np.pi, (1000,10000), 0, 0], framework="adaptive",truncation=2)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), 0, 0], framework="random",truncation=4)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), 30e3, 20e3], framework="random",truncation=4)
-                    learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), 30e3, 20e3], framework="random",truncation=2)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,20), 30e3, 20e3], framework="random",truncation=5)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (20,80), 30e3, 20e3], framework="random",truncation=5)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), np.inf, np.inf], framework="random",truncation=5)
+                    learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.99,1.01), np.inf, np.inf], framework="random",truncation=5)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,20), np.inf, np.inf], framework="random",truncation=2)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,10), 30e3, 20e3], framework="random",truncation=2)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), np.inf, np.inf], framework="random",truncation=2)
                     #learner = AdaptiveLearner([], [None, 1, None, 1, alpha, np.pi, (0.2,80), 30e3, 20e3], framework="random",truncation=4)
                     #learner = AdaptiveLearner([], [None, 1, None, 1, alpha, np.pi, (79,80), 30e3, 20e3], framework="random",truncation=4)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 0.25, alpha, np.pi, (1,2), 0, 0], framework="adaptive_area",truncation=3)
@@ -139,7 +148,15 @@ def main():
                         continue
                     #get the next point to evaluate
                     learner = learners[gate_name]
-                    qubits_2_eval = learner.get_next_dp(N=1)
+                    qubits_2_eval = learner.get_next_dp(N=30)
+                    if "comm" in gate_name:# in this case, the gate should only be performed on integers of a certain periodicity.
+                        period = 0.5
+                        for i in range(len(qubits_2_eval)):
+                            qubits_2_eval[i]["Lambdas"] = np.ceil(qubits_2_eval[i]["Lambdas"] / period) * period
+                        #take only unique values of Lambdas
+                        lambdas = [q["Lambdas"] for q in qubits_2_eval]
+                        qubits_2_eval = [qubits_2_eval[i] for i in range(len(qubits_2_eval)) if qubits_2_eval[i]["Lambdas"] not in lambdas[:i]]
+
                     shuffle(qubits_2_eval)
                     for i in range(len(qubits_2_eval)):
                         qubits_2_eval[i]["Ec_IC"] = Ec_IC
@@ -155,7 +172,7 @@ def main():
                             qubits_2_eval[i], gate_instances[i] = calib_gate((qubit, gate))
                     else:
                         results = []
-                        with normalPool(processes=60) as pool:
+                        with normalPool(processes=15) as pool:
                             args = [(qubits_2_eval[i], gate_instances[i]) for i in range(len(qubits_2_eval))]
                             results = pool.map(calib_gate, args)
                             for i in range(len(qubits_2_eval)):
