@@ -185,3 +185,5 @@ cython_debug/
 *.pin
 *.dummy
 *.mp4
+.vscode
+*.json
