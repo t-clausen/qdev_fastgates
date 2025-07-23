@@ -333,6 +333,7 @@ def solveEi(hamiltonian, truncation,meta="",gpu=True):
     #get random seed from curl
     if hamiltonian.shape[0] <= 3000:
         gpu = False
+    gpu = False #TEMP
     if gpu:
         result = subprocess.check_output('curl "http://www.randomnumberapi.com/api/v1.0/random?min=100&max=1000&count=5" ', shell=True, text=True)
         random.seed(result)
@@ -340,7 +341,7 @@ def solveEi(hamiltonian, truncation,meta="",gpu=True):
         result = subprocess.check_output('curl "http://www.randomnumberapi.com/api/v1.0/random?min=100&max=1000&count=5" ', shell=True, text=True)
         #rlocal = copy.deepcopy(random)
         random.seed(result)
-        rnd = random.uniform(0, 3)
+        rnd = random.uniform(0, 0.1)#!edit3)
         if gpu:
             print(f"Waiting {rnd} seconds for GPU")
             sleep(rnd)
@@ -587,6 +588,8 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
                 result = pickle.load(f)
                 print("Loaded")
         else:
+            if not os.path.exists("temp"):
+                os.makedirs("temp")
             pathlib.Path(f"temp/{meta_name}.dummy").touch()
             result = minimize(task, initial, method='Nelder-Mead', options={'disp': True, 'xatol': 1e-2})
             with open(f"temp/{meta_name}.pickle", "wb") as f:
@@ -621,22 +624,27 @@ def get_diag_Hamiltonian(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex=np.pi*4, base_s
     last_eigvals = eigvals
     i = 0
     last_gradient = [np.inf,np.inf]
+    first = True
     while not np.array([gradient[0]<0.0001, gradient[1]<0.0001]).all() and truncation > 2 and optim and not force_size:
-        if vary_mode == 0:
+        if vary_mode == 0 and not first:
             #vary base size
             base_size += 1000
         elif vary_mode == 1:
             #vary base ex
             base_ex += np.pi/2
+        
         H0, eigvals, eigvecs, basisTransform = sol(Ec,El,Ej,phi_dc,omega_01,alpha, base_ex, base_size,expansion_order)
         #find the gain from this (gradient)
         diff = np.abs(eigvals[:3]-last_eigvals[:3])
         if vary_mode == 0:
             gradient[0] = np.mean(diff)
+            if first:
+                gradient[0] = 1
         elif vary_mode == 1:
             gradient[1] = np.mean(diff)#bias
+        first = False
         last_eigvals = eigvals
-        if np.any([last<current for last,current in zip(last_gradient,gradient)]):
+        if np.any([last<current for last,current in zip(last_gradient,gradient)]) or eigvals[0] > 1000:
             #if this is the case, we expect a numerical error, so instead of continuing, shrink the matrix and end itteration
             if vary_mode == 0:
                 base_size -= 1000
@@ -725,17 +733,17 @@ def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, ba
     
     
     #print(n-n.T.conj())
-    basisTransform = cupy.asarray(basisTransform)
+    #basisTransform = cupy.asarray(basisTransform)#temp
     #n1 = np.diag(n)
     #n2 = np.diag(n,1)
     #n3 = np.diag(n,-1)
     #n = cupyx.scipy.sparse.diags([n1,n2,n3], [0,1,-1], format="csr")
-    n = cupyx.scipy.sparse.csr_matrix(n)
+    #n = cupyx.scipy.sparse.csr_matrix(n)#temp
     #phi1 = np.diag(phi)
     #phi2 = np.diag(phi,1)
     #phi3 = np.diag(phi,-1)
     #phi = cupyx.scipy.sparse.diags([phi1,phi2,phi3], [0,1,-1], format="csr")
-    phi = cupyx.scipy.sparse.csr_matrix(phi)
+    #phi = cupyx.scipy.sparse.csr_matrix(phi)#temp
     #n = cupy.dot(cupy.dot(basisTransform.T.conj(), n), basisTransform)
     n = basisTransform.T.conj() @ n @ basisTransform
     #print(n-n.T.conj())
@@ -756,14 +764,14 @@ def init_qubit(Ec,El,Ej,phi_dc,omega_01,alpha,c_ops,Lambdas, base_ex=np.pi*4, ba
 
     #truncate
     H0 = H0[:truncation,:truncation]
-    tmp = n_opp[:truncation,:truncation].get()
+    tmp = n_opp[:truncation,:truncation]#.get()
     del n_opp
     n_opp = tmp
-    tmp = phi_opp[:truncation,:truncation].get()
+    tmp = phi_opp[:truncation,:truncation]#.get()
     del phi_opp
     phi_opp = tmp
     eigenvecs = eigenvecs[:,:truncation]
-    tmp = basisTransform[:,:truncation].get()
+    tmp = basisTransform[:,:truncation]#.get()
     del basisTransform
     basisTransform = tmp
     eigenvals = eigenvals[:truncation]

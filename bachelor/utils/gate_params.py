@@ -44,13 +44,13 @@ def compute_inv(args):
     #print("Matrix:")
     #print(matrix)
     #invert
-    try:
-        matrix_inv = np.linalg.inv(matrix)
-    except np.linalg.LinAlgError as e:
-        matrix = np.array([
-            [matrix[i][j]+np.random.uniform(-1e-10, 1e-10) for j in range(len(matrix[i]))] for i in range(len(matrix))]
-        )
-        matrix_inv = np.linalg.inv(matrix)
+    #try:
+    matrix_inv = np.linalg.inv(matrix)
+    #except np.linalg.LinAlgError as e:
+    #    matrix = np.array([
+    #        [matrix[i][j]+np.random.uniform(-1e-10, 1e-10) for j in range(len(matrix[i]))] for i in range(len(matrix))]
+    #    )
+    #    matrix_inv = np.linalg.inv(matrix)
     c_arr = matrix_inv @ np.array([[0]*N+ [np.pi/2/t_g]]).flatten()
     c_arr = c_arr[:-1]
     #plot historgram
@@ -64,7 +64,177 @@ def compute_inv(args):
     plt.close()
     return c_arr
 
-def A_matrix_func(n, m,gn_func=None,gm_func=None,forbidden_intervals=None,omega_d=None, t_g=None, omega_01=None, omega_12=None, omega_23=None,N=None,doB=None,phi_opp=None):
+def compute_inv_fix(args):
+    t_g = args["t_g"]
+    omega_01 = args["omega_01"]
+    omega_12 = args["omega_12"]
+    omega_23 = args["omega_23"]
+    phi_opp = args["phi_opp"]
+    if len(phi_opp) > 2:
+        phi_12 = phi_opp[1,2]
+    else:
+        phi_12 = 0
+    #doB = args["doB"]
+    N = args["N"]
+    try:
+        args['omega_d'] = args['omega_d'].subs(sp.Symbol('omega_{01}'), omega_01).subs(sp.Symbol('phi_{12}'), phi_12).subs(sp.Symbol('omega_{12}'), omega_12).subs(sp.Symbol('t_g'), t_g)
+    except:
+        pass
+    #B_loc = B_matrix.subs(sp.Symbol('t_g'),t_g).subs(sp.Symbol('omega_{01}'), omega_01).subs(sp.Symbol('omega_{12}'), omega_12).subs(sp.Symbol('omega_{23}'), omega_23)
+    if "FASTamp" in args:
+        FASTamp = args["FASTamp"]
+    else:
+        FASTamp = 0
+    Aamp = np.cos(FASTamp*np.pi/2)
+    Bamp = np.sin(FASTamp*np.pi/2)
+    matrix_belem00 = [
+        [
+            Aamp*A_matrix_func(i,j,**args) + Bamp*B_matrix_func_fix(i,j,**args) + Aamp*A_matrix_func(j,i,**args) + Bamp*B_matrix_func_fix(j,i,**args)
+            for j in range(1, N+1)
+        ] for i in range(1, N+1)
+    ]
+    matrix_belem01 = [
+        [
+            -1 for j in range(1, N+1)
+        ]
+    ]
+    matrix_belem10 = [
+        [1] for j in range(1, N+1)
+    ]
+    matrix_belem11 = [[0]]
+    matrix = np.zeros((N+1,N+1), dtype=complex)
+    matrix[0:N, 0:N] = matrix_belem00
+    matrix[0:N,N] = matrix_belem01[0]
+    matrix[N, 0:N] = np.array(matrix_belem10).flatten()
+    matrix[N, N] = matrix_belem11[0][0]
+    #print("Matrix:")
+    #print(matrix)
+    #invert
+    #try:
+    try:
+        matrix_inv = np.linalg.inv(matrix)
+    except np.linalg.LinAlgError as e:
+        bmatrix = [
+            [
+                B_matrix_func_fix(i,j,**args) for j in range(1, N+1)
+            ] for i in range(1, N+1)
+        ]
+        bnds = [(0, np.pi/(2*t_g))]*N
+        def loss(vec,*args):
+            vec = vec/sum(vec)* np.pi/(2*t_g)
+            for i,x in enumerate(vec):
+                if x > bnds[i][1] or x < bnds[i][0]:
+                    return np.inf
+            lossval = float(vec.T @ bmatrix @ vec)
+            return lossval
+        from scipy.optimize import minimize
+        initial = [np.pi/(4*t_g)] + [0]*(N-1)
+        result = minimize(loss, initial, method="Nelder-Mead", bounds=bnds)
+        c_arr = np.array(result.x)
+        c_arr = c_arr/sum(c_arr)* np.pi/(2*t_g)
+        return c_arr
+    #except np.linalg.LinAlgError as e:
+    #    matrix = np.array([
+    #        [matrix[i][j]+np.random.uniform(-1e-10, 1e-10) for j in range(len(matrix[i]))] for i in range(len(matrix))]
+    #    )
+    #    matrix_inv = np.linalg.inv(matrix)
+    c_arr = matrix_inv @ np.array([[0]*N+ [np.pi/2/t_g]]).flatten()
+    c_arr = c_arr[:-1]
+    #plot historgram
+    if 0:
+        plt.bar(range(len(c_arr)), c_arr)
+        plt.title("c_arr")
+        plt.xlabel("c_arr")
+        plt.ylabel("count")
+        plt.grid()
+        plt.savefig("temp/c_arr_hist.png")
+        plt.show()
+        plt.close()
+    return c_arr
+
+def compute_inv_fix_woFAST(args):
+    t_g = args["t_g"]
+    omega_01 = args["omega_01"]
+    omega_12 = args["omega_12"]
+    omega_23 = args["omega_23"]
+    phi_opp = args["phi_opp"]
+    if len(phi_opp) > 2:
+        phi_12 = phi_opp[1,2]
+    else:
+        phi_12 = 0
+    #doB = args["doB"]
+    N = args["N"]
+    try:
+        args['omega_d'] = args['omega_d'].subs(sp.Symbol('omega_{01}'), omega_01).subs(sp.Symbol('phi_{12}'), phi_12).subs(sp.Symbol('omega_{12}'), omega_12).subs(sp.Symbol('t_g'), t_g)
+    except:
+        pass
+    #B_loc = B_matrix.subs(sp.Symbol('t_g'),t_g).subs(sp.Symbol('omega_{01}'), omega_01).subs(sp.Symbol('omega_{12}'), omega_12).subs(sp.Symbol('omega_{23}'), omega_23)
+    matrix_belem00 = [
+        [
+            B_matrix_func_fix(i,j,**args) + B_matrix_func_fix(j,i,**args)
+            for j in range(1, N+1)
+        ] for i in range(1, N+1)
+    ]
+    matrix_belem01 = [
+        [
+            -1 for j in range(1, N+1)
+        ]
+    ]
+    matrix_belem10 = [
+        [1] for j in range(1, N+1)
+    ]
+    matrix_belem11 = [[0]]
+    matrix = np.zeros((N+1,N+1), dtype=complex)
+    matrix[0:N, 0:N] = matrix_belem00
+    matrix[0:N,N] = matrix_belem01[0]
+    matrix[N, 0:N] = np.array(matrix_belem10).flatten()
+    matrix[N, N] = matrix_belem11[0][0]
+    #print("Matrix:")
+    #print(matrix)
+    #invert
+    try:
+        matrix_inv = np.linalg.inv(matrix)
+    except np.linalg.LinAlgError as e:
+        bmatrix = [
+            [
+                B_matrix_func_fix(i,j,**args) for j in range(1, N+1)
+            ] for i in range(1, N+1)
+        ]
+        bnds = [(0, np.pi/(2*t_g))]*N
+        def loss(vec,*args):
+            vec = vec/sum(vec)* np.pi/(2*t_g)
+            for i,x in enumerate(vec):
+                if x > bnds[i][1] or x < bnds[i][0]:
+                    return np.inf
+            lossval = float(vec.T @ bmatrix @ vec)
+            return lossval
+        from scipy.optimize import minimize
+        initial = [np.pi/(4*t_g)] + [0]*(N-1)
+        result = minimize(loss, initial, method="Nelder-Mead", bounds=bnds)
+        c_arr = np.array(result.x)
+        c_arr = c_arr/sum(c_arr)* np.pi/(2*t_g)
+        return c_arr
+
+
+    #    matrix = np.array([
+    #        [matrix[i][j]+np.random.uniform(-1e-10, 1e-10) for j in range(len(matrix[i]))] for i in range(len(matrix))]
+    #    )
+    #    matrix_inv = np.linalg.inv(matrix)
+    c_arr = matrix_inv @ np.array([[0]*N+ [np.pi/2/t_g]]).flatten()
+    c_arr = c_arr[:-1]
+    #plot historgram
+    if 0:
+        plt.bar(range(len(c_arr)), c_arr)
+        plt.title("c_arr")
+        plt.xlabel("c_arr")
+        plt.ylabel("count")
+        plt.grid()
+        plt.savefig("temp/c_arr_hist.png")
+        plt.show()
+        plt.close()
+    return c_arr
+
+def A_matrix_func(n, m,gn_func=None,gm_func=None,forbidden_intervals=None,omega_d=None, t_g=None, omega_01=None, omega_12=None, omega_23=None,N=None,doB=None,phi_opp=None,FASTamp=None):
     gn = gn_func.subs(sp.Symbol('n'), n)
     gn = gn.subs(sp.Symbol('t_g'), t_g)
     gm = gm_func.subs(sp.Symbol('m'), m)
@@ -117,6 +287,24 @@ def B_matrix_func(n, m,gn_func=None,gm_func=None,forbidden_intervals=None,omega_
         #(2*(sp.sin(omega_d*t_g)**2)+2*(sp.cos(omega_d*t_g)**2)/((n*sp.pi/(2*omega_d*t_g))**2-1), sp.Eq(sp.Mod(n, 2), 0) & sp.Eq(sp.Mod(m, 2), 1)),
         #(2*(sp.sin(omega_d*t_g)**2)+2*(sp.cos(omega_d*t_g)**2)/((m*sp.pi/(2*omega_d*t_g))**2-1), sp.Eq(sp.Mod(n, 2), 1) & sp.Eq(sp.Mod(m, 2), 0)),
         #(2+2*(sp.cos(omega_d*t_g)**2)*(1/((1-(2*omega_d*t_g/(n*sp.pi))**2)*(1-(2*omega_d*t_g/(m*sp.pi))**2))-1), sp.Eq(sp.Mod(n, 2), 1) & sp.Eq(sp.Mod(m, 2), 1))
+    )
+    return B_matrix
+def B_matrix_func_fix(n, m,gn_func=None,gm_func=None,forbidden_intervals=None,omega_d=None, t_g=None, omega_01=None, omega_12=None, omega_23=None,N=None,doB=True,phi_opp=None,FASTamp=None):
+    if not doB:
+        return 0
+    a = n*sp.pi/(omega_d*t_g)
+    b = m*sp.pi/(omega_d*t_g)
+    """B_matrix = sp.Piecewise(
+        (4*a*b*sp.sin(omega_d*t_g)**2/((a**2-1)*(b**2-1)), True),
+        #(2*(sp.sin(omega_d*t_g)**2)+2*(sp.cos(omega_d*t_g)**2)/((n*sp.pi/(2*omega_d*t_g))**2-1), sp.Eq(sp.Mod(n, 2), 0) & sp.Eq(sp.Mod(m, 2), 1)),
+        #(2*(sp.sin(omega_d*t_g)**2)+2*(sp.cos(omega_d*t_g)**2)/((m*sp.pi/(2*omega_d*t_g))**2-1), sp.Eq(sp.Mod(n, 2), 1) & sp.Eq(sp.Mod(m, 2), 0)),
+        #(2+2*(sp.cos(omega_d*t_g)**2)*(1/((1-(2*omega_d*t_g/(n*sp.pi))**2)*(1-(2*omega_d*t_g/(m*sp.pi))**2))-1), sp.Eq(sp.Mod(n, 2), 1) & sp.Eq(sp.Mod(m, 2), 1))
+    )"""
+    B_matrix = 4*sp.sin(omega_d*t_g)**2*(
+        1+
+        1/((a**2-1)*(b**2-1)) +
+        1/(a**2-1)+
+        1/(b**2-1) 
     )
     return B_matrix
 
@@ -433,7 +621,7 @@ def get_gate_params(gate="demo"):
                 np.array([[0,0],[0,0]])
             ]
         })
-    elif "FAST-MAGNUS" in gate and "DRAG" not in gate:
+    elif "FAST-MAGNUS" in gate and "DRAG" not in gate and "MAGNUS-MAGNUS" not in gate:
         N=3
         c_arr = [sp.Symbol(f'c_{n}') for n in range(1, N+1)]
         t = sp.Symbol('t')
@@ -593,6 +781,8 @@ def get_gate_params(gate="demo"):
         })
     elif "FAST-MAGNUS-MAGNUS" in gate:
         N=3
+        if "-N" in gate:
+            N = int(gate.split("-N")[1])
         c_arr = [sp.Symbol(f'c_{n}') for n in range(1, N+1)]
         t = sp.Symbol('t')
         t_0 = sp.Symbol('t_0')
@@ -607,33 +797,64 @@ def get_gate_params(gate="demo"):
                 ),
                 (t>=t_0) & (t<=t_g+t_0))
             , (0,True))
-        t_c = sp.pi/omega_d
-        lambda_ = sp.Symbol('lambda')
-        Lambda = t_g/(2*np.pi/sp.Symbol('omega_{01}'))
-        N_c = sp.ceiling(t_g/t_c)
-        #lambda_initial = 2*np.pi*(N_c)/t_g
-        lambda_initial = sp.Piecewise(
-            (2*np.pi*(t_g/t_c)/t_g, Lambda < 1),
-            (2*np.pi*(N_c)/t_g, Lambda >= 1)
-        )
-        envelope_quad = -(lambda_**-1)*sp.diff(envelope_inphase, t) #the derivative of the in-phase envelope
+        envelope_quad = sp.Piecewise(
+            (
+                sum(
+                    [c_arr[i-1] * sp.sin(2*sp.pi*i*(t-t_0)/t_g) for i in range(1, N+1)]
+                ),
+                (t>=t_0) & (t<=t_g+t_0))
+            , (0,True))
+        if "minus" in gate:
+            envelope_quad = -envelope_quad
+        envelope_quad *= 0#!temp
+        t_c = sp.pi/omega_01
+        if "monoquad" in gate:
+            N_c = sp.ceiling(t_g/t_c)
+            k_arr = [
+                sp.Piecewise(
+                    (c_arr[n-1], n==N_c),
+                    (0, True)
+                )
+                for n in range(1, N+1)]
+            envelope_quad = sum(
+                [k_arr[i-1] * sp.sin(2*sp.pi*i*(t-t_0)/t_g) for i in range(1, N+1)]
+            )
+        if "dualquad" in gate:
+            N_c_c = sp.ceiling(t_g/t_c)
+            N_c_f = sp.floor(t_g/t_c)
+            k_arr = [
+                sp.Piecewise(
+                    (c_arr[n-1], n==N_c_c or n==N_c_f),
+                    (0, True)
+                )
+                for n in range(1, N+1)]
+            envelope_quad = sum(
+                [k_arr[i-1] * sp.sin(2*sp.pi*i*(t-t_0)/t_g) for i in range(1, N+1)]
+            )
+        if "fullquad" in gate:
+            k_arr = c_arr
+            envelope_quad = sum(
+                [k_arr[i-1] * sp.sin(2*sp.pi*i*(t-t_0)/t_g) for i in range(1, N+1)]
+            )
+        if "derrquad" in gate:
+            N_c = sp.ceiling(t_g/t_c)
+            k_arr = [c_arr[i-1] * i/N_c for i in range(1, N+1)]
+            envelope_quad = sum(
+                [k_arr[i-1] * sp.sin(2*sp.pi*i*(t-t_0)/t_g) for i in range(1, N+1)]
+            )
+        if "noFM" in gate:
+            c_arr[0] = np.pi/(2*t_g)
+            c_arr[1:] = 0
         
         omega_d = omega_01#-(3*(sp.pi**2))*(phi_12**2-2*phi_12)/(128*alpha*(t_g**2))#from the RWA condition
         theta_a = 0
         theta_b = 0
-        calibrate_Omega = True
+        calibrate_Omega = False
         Omega_eq = None
         n,m = sp.symbols('n'), sp.symbols('m')
         n = sp.Symbol('n')
         m = sp.Symbol('m')
         
-        F_x = sum(
-            [c_arr[i-1]*c_arr[j-1] * (
-                B_matrix_func(i, j, omega_d=omega_d, t_g=t_g)
-            ) for i in range(1, N+1) for j in range(1, N+1)]
-        )
-        F_y = F_x
-        cond_eq = sp.pi/4-t_g*sum(c_arr)
         omega_0 = 0
         omega_12 = sp.Symbol('omega_{12}')
         omega_02 = omega_01 + omega_12
@@ -657,20 +878,31 @@ def get_gate_params(gate="demo"):
             
         #Lagrangian = lambda: K_func() + F_x + F_y + cond_eq
         #Lagrangian = sp.simplify(Lagrangian)
-
+        invfunc = compute_inv if "fix1707" not in gate else compute_inv_fix
+        amp_FAST = 0.0
+        if "woFAST" in gate:
+            #invfunc = compute_inv_fix_woFAST
+            amp_FAST = 0.0
         calibrate_lambda = False
+        calibrate_FAST = False
+        if "hypFAST" in gate:
+            calibrate_FAST = True
+        if "amp" in gate:
+            calibrate_Omega = True
+        if "skipFM" in gate:
+            amp_FAST = 10000000
         return po.GateParams({
             "omega_d": omega_d,
             "known_t0": False,
             "get_matrix_inverse": True,
-            "matrix_inverse": compute_inv,
+            "matrix_inverse": invfunc,
             "calibrate_VZ": True,
+            "calibrate_Omega": calibrate_Omega,
+            "calibrate_FAST": calibrate_FAST,
+            "initial_FAST": amp_FAST,
             "gn_func": gn_func,
             "gm_func": gm_func,
             "doB": True,
-            "calibrate_lambda": calibrate_lambda,
-            "initial_lambda": lambda_initial,
-            "lambda_eq": lambda_initial,
             "name": gate,
             "polarization": (np.cos(theta_a), np.sin(theta_a)*np.exp(-1j*theta_b)),
             "envelope_inphase": envelope_inphase,
@@ -706,7 +938,10 @@ def get_gate_params(gate="demo"):
         omega_d = omega_01-(3*(sp.pi**2))*((phi_12**2)-2*phi_12)/(128*alpha*(t_g**2))
         theta_a = 0
         theta_b = 0
-        calibrate_Omega = True
+        if "amp" in gate:
+            calibrate_Omega = True
+        else: 
+            calibrate_Omega = False
         Omega_eq = None
         n,m = sp.symbols('n'), sp.symbols('m')
         n = sp.Symbol('n')

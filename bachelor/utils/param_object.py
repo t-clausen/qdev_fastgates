@@ -65,7 +65,10 @@ class GateParams:
                             self.Omega_amp = param_dict["initial_Omega"]
                         self.is_calibrated["Omega"] = False
                     else:
-                        self.Omega_amp = param_dict["initial_Omega"]
+                        if "initial_Omega" in param_dict:
+                            self.Omega_amp = param_dict["initial_Omega"]
+                        else:
+                            self.Omega_amp = 1
                 elif "_lambda" in key:
                     if self.__dict__[key] == True:
                         self.lambda_amp = 1
@@ -78,7 +81,12 @@ class GateParams:
                         if "initial_dt0" in param_dict:
                             self.dt0_amp = param_dict["initial_dt0"]
                         self.is_calibrated["dt0"] = False
-
+                elif "_FAST" in key:
+                    if self.__dict__[key] == True:
+                        self.FAST_amp = 1.0
+                        self.is_calibrated["FAST"] = False
+                    if "initial_FAST" in param_dict:
+                        self.FAST_amp = param_dict["initial_FAST"]
 
     """    def assert_calibration(self, key, value):
         if key == "Z":
@@ -106,7 +114,7 @@ class GateParams:
         self.H0 = qt.Qobj(self.H0)
 
         self.polarization = np.array(self.polarization).astype(np.complex128)
-        print(self.polarization)
+        #print(self.polarization)
         #carrier = lambda t: np.exp(1j*self.omega_d*t)*self.polarization
         #self.function = lambda t: np.sum([(self.envelope(t)*carrier(t))[i]*np.array([self.n_opp, self.phi_opp])[i] for i in range(2)], axis=0)
         omega_d=self.omega_d
@@ -251,6 +259,7 @@ class GateParams:
             omega_12s = sp.Symbol('omega_{12}')
             phi_12s = sp.Symbol('phi_{12}')
             func = self.function
+            #print(func)
             if sp.Symbol('Omega') in func.free_symbols:
                 func = func.subs(sp.Symbol('Omega'), self.Omega_amp)
             if t0 != None and t0 != np.nan: func = func.subs(t0s, t0)
@@ -266,6 +275,9 @@ class GateParams:
             if hasattr(self,'envelope_coffs'):
                 for i in range(len(self.envelope_coffs)):
                     func = func.subs(sp.Symbol(f'c_{i+1}'), self.envelope_coffs[i])
+                if hasattr(self, 'Omega_amp'):
+                    if self.Omega_amp != 1:
+                        func *= self.Omega_amp
             if dt0 != None:
                 func = func.subs(sp.Symbol('dt_0'), dt0)
             func = func.evalf()

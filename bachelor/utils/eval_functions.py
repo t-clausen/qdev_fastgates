@@ -1,4 +1,7 @@
 import adaptive.learner.learner2D
+import sys
+import os
+sys.path.append(os.path.abspath(f"{__file__}/../.."))
 from utils import gate_evaluator as ge
 from utils import gate_simulator as gs
 from utils import param_object as po
@@ -40,11 +43,11 @@ class AdaptiveLearner:
 
         #bounds are expected to be a list of tuples. If an ellement is of float type rather than tuple, it is accepted as a fixed value
         bnds = [b if isinstance(b, tuple) else None for b in bounds]
-        if bnds[6] is not None:
-            bnds[6] = (np.log10(bnds[6][0]), np.log10(bnds[6][1]))#t_g is expected to be in log scale
+        """if bnds[6] is not None:
+            bnds[6] = (np.log10(bnds[6][0]), np.log10(bnds[6][1]))#t_g is expected to be in log scale"""
         fixed = [b if not isinstance(b, tuple) else None for b in bounds]
-        if fixed[6] is not None:
-            fixed[6] = (np.log10(fixed[6]), np.log10(fixed[6]))#t_g is expected to be in log scale
+        """if fixed[6] is not None:
+            fixed[6] = (np.log10(fixed[6]), np.log10(fixed[6]))#t_g is expected to be in log scale"""
         self.bounds = bnds
         self.fixed = fixed
         self.drawn_points = 0
@@ -81,10 +84,15 @@ class AdaptiveLearner:
             lossfunc = None
             if "area" in framework:
                 lossfunc = adaptive.learner.learnerND.uniform_loss
-            self.learner = adaptive.LearnerND(dummy_function, self.bounds_actual, loss_per_simplex=lossfunc)
+            if "res" in framework:
+                lossfunc = adaptive.learner.learner2D.resolution_loss_function(min_distance=0.01)
+                self.learner = adaptive.Learner2D(dummy_function, self.bounds_actual, loss_per_triangle=lossfunc)
+            else:
+                self.learner = adaptive.LearnerND(dummy_function, self.bounds_actual, loss_per_simplex=lossfunc)
             if len(self.xs) > 0:
                 for x,y in zip(self.xs,self.ys):
-                    self.learner.tell(x,y)
+                    if y == None: continue
+                    self.learner.tell(x,np.log10(1.01-y))
         elif framework == "random":
             import random
             self.learner = random.Random()
@@ -154,14 +162,14 @@ class AdaptiveLearner:
             points = [points,np.full(N, np.inf)]
         else:
             raise NotImplementedError(f"Framework {self.framework} is not implemented")
-        t_g_index = self.point_keys.index("Lambdas")
+        """t_g_index = self.point_keys.index("Lambdas")
         for i in list(range(t_g_index)):
             if self.bounds[i] is None:#!new
-                t_g_index -= 1
-        if t_g_index > 0:
-            points[0][t_g_index] = np.power(10, points[0][t_g_index])#convert t_g back to normal scale
-        else:
-            points= (np.power(10, points[0]),points[1])
+                t_g_index -= 1"""
+        #if t_g_index > 0:
+        #    points[0][t_g_index] = np.power(10, points[0][t_g_index])#convert t_g back to normal scale
+        #else:
+        #    points= (np.power(10, points[0]),points[1])
         self.drawn_points += N
         #put fixed values in the points
         tpoints = []
@@ -206,6 +214,23 @@ class AdaptiveLearner:
         with open("qubit_names.pickle", "wb") as f:
             pickle.dump(qubit_names, f)
 
+        alpha_ICs = {
+            0.01: [0.01, 1, 0.5],
+            0.1: [0.05, 1, 1.08],
+            1: [0.27, 1, 2.4],
+            10: [2, 1, 10],
+            20: [4.02, 1, 21.7],
+        }
+        for i in range(len(rpoints)):
+            a = rpoints[i]["alpha_target"]
+            idx_IC = np.argmin(np.abs(np.array(list(alpha_ICs.keys())) - a))
+            Ec_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][0]
+            El_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][1]
+            Ej_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][2]
+            rpoints[i]["Ec_IC"] = Ec_IC
+            rpoints[i]["El_IC"] = El_IC
+            rpoints[i]["Ej_IC"] = Ej_IC
+
         #return these
         return rpoints
         
@@ -228,7 +253,8 @@ class AdaptiveLearner:
                     self.xs = np.vstack((self.xs, point))
                     self.ys = np.append(self.ys, score)
                 try:
-                    self.learner.tell(point, score)
+                    if score is None: continue
+                    self.learner.tell(point, np.log10(1.01-score))
                 except ValueError as e:
                     if "Point already in triangulation" in str(e):
                         print(f"Point {point} already in triangulation")
@@ -461,18 +487,23 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
                     cal[1] = True
             elif "VZ1" not in gate_params.is_calibrated.keys():
                 cal[0] = False
+            verygood = False
             try:
                 r = minimize(score_at_Zamp, (0,0), method="Nelder-Mead",args=cal)
                 val_best = r.x
+                verygood = False
             except StopIteration as e:
                 print(e)
                 indx_best = np.argmin(a_s)
                 val_best = theta_cords[indx_best]
+                verygood = True
             val_best = np.array(val_best)
             if not cal[0]: val_best[0] = 0
             if not cal[1]: val_best[1] = 0
 
             Z_amps.append(val_best)
+            if verygood:
+                Z_amps.append(val_best)
         if calZ:
             results_list.append(opperators)
         else:
@@ -570,6 +601,9 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
     s = np.mean(scores).real
     #scheme_scores[qubit["name"]][gate] = s
     #also save this in scheme_scores_raw
+    FASTamp = None
+    if hasattr(gate_params, "FAST_amp"):
+        FASTamp = gate_params.FAST_amp
 
     dp = {  
         "Ec": qubit["Ec"],
@@ -586,6 +620,7 @@ def eval_qubit(gate_params, qubit, t0_samplerate=5, calZ=False):
         "gate": gate,
         "T1": qubit["T1"],
         "T2": qubit["T2"],
+        "FAST_amp": FASTamp,
     }
     #scheme_scores_raw.append(dp)
     return s,dp, gate_params
@@ -608,6 +643,10 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
                 #create a new matrix
                 
                 #do the calibration
+                if "Ej_actual" in qubit.keys():
+                    qubit["Ej_IC"] = qubit["Ej_actual"]
+                    qubit["El_IC"] = qubit["El_actual"]
+                    qubit["Ec_IC"] = qubit["Ec_actual"]
                 H0, n_opp, phi_opp, c_ops, t_g, base_ex, base_size, Ec, El, Ej = qbi.init_qubit(qubit["Ec"], qubit["El"], qubit["Ej"], qubit["phi_dc"],qubit['omega_01_target'],qubit['alpha_target'], qubit["c_ops"], qubit["Lambdas"],truncation=qubit["truncation"], base_ex=qubit["base_ex"], base_size=qubit["base_size"],Ec_IC=qubit["Ec_IC"],El_IC=qubit["El_IC"],Ej_IC=qubit["Ej_IC"])
                 qubit["base_ex"] = base_ex
                 qubit["base_size"] = base_size
@@ -630,6 +669,9 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
                 #loss_per_interval = lambda xs,ys: np.diff(xs)*(np.mean(ys)**(-1))#!I have no clue what y is at this point, but this seem to give the correct behavior
                 if "Omega" in valname:
                     bnds = (0, 10/t_g)
+                    initial = 1
+                    if bnds[1] < initial*2:
+                        bnds = (0, initial*3)
                 elif "dt0" in valname:
                     initial = gate_params.dt0_amp.subs(sp.symbols("t_g"), t_g)
                     bnds = (initial-0.5*np.abs(initial), initial)
@@ -708,15 +750,24 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
                     if l == np.nan:
                         print(f"Invalid score for {valname} = {val}, score = {l}")
                         return 1
+                    print(l)
+                    if 1:
+                        plt.clf()
+                        plt.scatter(vals, scores)
+                        plt.xlabel("Value")
+                        plt.ylabel("Score")
+                        plt.title(f"Calibration for {qubit['name']} with {gate} at {valname}")
+                        plt.savefig(f"temp/calibration_{qubit['name']}_{gate}_{valname}.png")
+                        plt.savefig(f"temp/calibration.png")
+                        plt.clf()
+                        plt.close()
                     return l
                 try:
-                    r = minimize(score_at_val, initial, method="Nelder-Mead", bounds=[bnds])
-                    val = r.x[0]
-                    indx_best = np.argmin(scores)
+                    r = minimize(score_at_val, initial, method="Nelder-Mead", bounds=[bnds], options={"maxiter": 100})
                 except StopIteration as e:
                     print(e)
-                    indx_best = np.argmin(scores)
-                    val = vals[indx_best]
+                indx_best = np.argmin(scores)
+                val = vals[indx_best]
                 exec(f"gate_params.{valname}_amp = val")
                 scorebest = scores[indx_best]
                 print(f"Best score for {valname} was {val} with score {scorebest}")
@@ -970,27 +1021,185 @@ def do_test(qubit,gate_params):
     qubit["c_ops"] = c_ops
     qubit["t_g"] = t_g
     qubit["Lambdas"] = qubit["Lambdas"]
+    if hasattr(gate_params, "FAST_amp"):
+        qubit["FAST_amp"] = gate_params.FAST_amp
     #for gate in gate_names_2_eval:
     #    #gate_params = get_gate_params(gate)
     score, datapoint, _ = eval_qubit(gate_params, qubit, t0_samplerate=10)
     scores.append(score)
     points.append(datapoint)
     return scores, points
+
+
+
+
 def calib_gate(args):
     qubit, gate_params = args
     #do the calibration
     #get the gate params
     gate = gate_params.name
     #gate_params = get_gate_params(gate)
+    def updt_qubit(qubit,gate_params):
+        H0, n_opp, phi_opp, c_ops, t_g, base_ex, base_size, Ec, El, Ej = qbi.init_qubit(qubit["Ec"], qubit["El"], qubit["Ej"], qubit["phi_dc"],qubit['omega_01_target'],qubit['alpha_target'], qubit["c_ops"], qubit["Lambdas"],truncation=qubit["truncation"], base_ex=qubit["base_ex"], base_size=qubit["base_size"],Ec_IC=qubit["Ec_IC"],El_IC=qubit["El_IC"],Ej_IC=qubit["Ej_IC"])
+        qubit["Ej_actual"] = Ej
+        qubit["Ec_actual"] = Ec
+        qubit["El_actual"] = El
+        qubit["base_ex"] = base_ex
+        qubit["base_size"] = base_size
+        qubit["omega_01_actual"] = H0[1,1]-H0[0,0]
+        qubit["n_opp"] = n_opp
+        qubit["phi_opp"] = phi_opp
+        qubit['H0'] = H0
+        qubit["t_g"] = t_g
+        qubit["c_ops"] = c_ops
+        if len(H0) >= 3: qubit["omega_12_actual"] = H0[2,2]-H0[1,1]
+        else: qubit["omega_12_actual"] = np.inf
+        if len(H0) >= 4: qubit["omega_23_actual"] = H0[3,3]-H0[2,2]
+        else: qubit["omega_23_actual"] = np.inf
+        if len(H0) <= 2: qubit['alpha_actual'] = np.inf
+        else:            qubit["alpha_actual"] = H0[2,2]-H0[1,1] - (H0[1,1]-H0[0,0])
+        return qubit, H0
+    def eval_coffs(gate_params, qubit, t_g=None, FASTamp = None):
+        if "t_g" in qubit.keys():
+            t_g = qubit["t_g"]
+        func = gate_params.matrix_inverse
+        args = {
+            "t_g": t_g,
+            "omega_d": gate_params.omega_d,
+            "omega_01": qubit["omega_01_actual"],
+            "omega_12": qubit["omega_12_actual"],
+            "omega_23": qubit["omega_23_actual"],
+            "phi_opp": qubit["phi_opp"],
+            "gn_func": gate_params.gn_func,
+            "gm_func": gate_params.gm_func,
+            "forbidden_intervals": gate_params.forbidden_intervals,
+            "N": len(gate_params.envelope_coffs),
+            "doB": gate_params.doB,
+            "FASTamp": FASTamp
+        }
+        c_arr = func(args)
+        gate_params.envelope_coffs = c_arr
+        return gate_params
+    def FAST_calib(gate_params, qubit, t_g, other=None):
+        amp_init = gate_params.FAST_amp
+        if other is not None:
+            otheramp = gate_params.__dict__[other+"_amp"]
+            amp_init = [amp_init, otheramp]
+        amps = []
+        losses = []
+        def loss(amp):
+            if other is  None:
+                amp = float(amp)
+                ampFAST = amp
+            else:
+                amp = np.array(amp, dtype=float)
+                ampFAST = amp[0]
+                ampOther = amp[1]
+            if ampFAST < 0 or ampFAST > 1: return np.inf
+            local_gate_params = copy(gate_params)
+            amps.append(amp)
+            exec(f"local_gate_params.FAST_amp = ampFAST")
+            if other is not None:
+                exec(f"local_gate_params.{other}_amp = ampOther")
+            local_gate_params = eval_coffs(local_gate_params, qubit, t_g, FASTamp=ampFAST)
+            score, _, _ = eval_qubit(local_gate_params, qubit, t0_samplerate=3, calZ=True)
+            print(f"FAST loss for {qubit['name']} with {gate}: {score.real} for amp {amp}")
+            losses.append(-score.real)
+            if 1:
+                plt.clf()
+                cmap = plt.get_cmap("viridis")
+                amp2plot = np.array(amps)[:min(10, len(amps))]
+                losses2plot = np.array(losses)[:min(10, len(losses))]
+                plt.scatter(np.array(amp2plot).T[0], np.array(amp2plot).T[1], c=1+np.array(losses2plot), cmap=cmap, norm=matplotlib.colors.LogNorm())
+                plt.colorbar()
+                plt.xlabel("FAST amplitude")
+                if other is not None:
+                    plt.ylabel(f"{other} amplitude")
+                else:
+                    plt.ylabel("FAST amplitude")
+                plt.title(f"Calibration for {qubit['name']} with {gate}")
+                plt.savefig(f"temp/calibration_{qubit['name']}_{gate}.png")
+                plt.savefig(f"temp/calibration.png")
+                plt.clf()
+                plt.close("all")
+            if 1-score.real < 1e-7:
+                print("Target fidelity reached")
+                raise StopIteration("Target fidelity reached")
+            return -score.real
+        #use a simple minimization to find the best amp
+        try:
+            amax = 1
+            for a in np.linspace(0, amax, 3):
+                if other is None:
+                    amptry = [a, amp_init[1]] if other is not None else a
+                    loss(amptry)
+                else:
+                    for o in [1.0*otheramp,0.9*otheramp]:
+                        amptry = [a, o]
+                        loss(amptry)
+            amp_init = amps[np.argmin(losses)]
+            res = minimize(loss, amp_init, method="Nelder-Mead", options={"maxiter": 50})
+            amp_best = res.x
+            if other is None:
+                amp_best = amp_best[0]
+        except StopIteration:
+            print("Target fidelity reached")
+            amp_best = amps[np.argmin(losses)]
+        if other is not None:
+            amp_FAST = amp_best[0]
+            amp_other = amp_best[1]
+            exec(f"gate_params.FAST_amp = amp_FAST")
+            exec(f"gate_params.{other}_amp = amp_other")
+        else:
+            amp_FAST = amp_best
+            exec(f"gate_params.FAST_amp = amp_FAST")
+        gate_params = eval_coffs(gate_params, qubit, t_g, FASTamp=amp_FAST)
+        return qubit, gate_params
     #check keys to calibrate
     do_VZ = False
     if "VZ" in gate_params.is_calibrated.keys():
         do_VZ = True
     keys_wo_VZ = [key for key in gate_params.is_calibrated.keys() if "VZ" not in key]
-    if len(keys_wo_VZ) == 1:#singel variable calibration
-        qubit, gate_params = single_param(gate_params, qubit, gate, do_VZ)
+    if len(keys_wo_VZ) == 1:#single variable calibration
+        t4 = hasattr(gate_params,"get_matrix_inverse")
+        if t4: t4 = gate_params.get_matrix_inverse
+        t3 = "t_g" not in qubit.keys()
+        if t3:
+            qubit, H0 = updt_qubit(qubit, gate_params)
+            t_g = qubit["t_g"]
+        else: t_g = qubit["t_g"]
+        #if t4: raise NotImplementedError("Single parameter calibration not implemented yet")#TODO: implement this
+        if "FAST" in keys_wo_VZ[0]:
+            #FAST calibration, kinda different, so the function is made here
+            qubit, gate_params = FAST_calib(gate_params, qubit, t_g)
+        else:
+            if t4:
+                #get the inverted matrix such as to calculate the envelope fourier coefficients
+                if hasattr(gate_params,"initial_FAST"):
+                    FAST_amp = gate_params.initial_FAST
+                gate_params = eval_coffs(gate_params, qubit, t_g, FASTamp=FAST_amp)
+            qubit, gate_params = single_param(gate_params, qubit, gate, do_VZ)
+
     elif len(keys_wo_VZ) == 2:
-        qubit, gate_params = two_param(gate_params, qubit, gate, do_VZ)
+        t4 = hasattr(gate_params,"get_matrix_inverse")
+        if t4: t4 = gate_params.get_matrix_inverse
+        t3 = "t_g" not in qubit.keys()
+        if t3:
+            qubit, H0 = updt_qubit(qubit, gate_params)
+            t_g = qubit["t_g"]
+        else: t_g = qubit["t_g"]
+        #if t4: raise NotImplementedError("Single parameter calibration not implemented yet")#TODO: implement this
+        fkey = 0 if "FAST" in keys_wo_VZ[0] else 1
+        if "FAST" in keys_wo_VZ[fkey]:
+            #FAST calibration, kinda different, so the function is made here
+            qubit, gate_params = FAST_calib(gate_params, qubit, t_g, other=keys_wo_VZ[1-fkey])
+        else:
+            if t4:
+                #get the inverted matrix such as to calculate the envelope fourier coefficients
+                if hasattr(gate_params,"initial_FAST"):
+                    FAST_amp = gate_params.initial_FAST
+                gate_params = eval_coffs(gate_params, qubit, t_g, FASTamp=FAST_amp)
+            qubit, gate_params = two_param(gate_params, qubit, gate, do_VZ)
     elif len(keys_wo_VZ) == 0:
         t1 = hasattr(gate_params,"lambda_eq")
         if hasattr(gate_params,"Omega_eq"):
@@ -998,24 +1207,7 @@ def calib_gate(args):
         else: t2 = False
         t3 = "t_g" not in qubit.keys()
         if t1 or t2 or t3:
-            H0, n_opp, phi_opp, c_ops, t_g, base_ex, base_size, Ec, El, Ej = qbi.init_qubit(qubit["Ec"], qubit["El"], qubit["Ej"], qubit["phi_dc"],qubit['omega_01_target'],qubit['alpha_target'], qubit["c_ops"], qubit["Lambdas"],truncation=qubit["truncation"], base_ex=qubit["base_ex"], base_size=qubit["base_size"],Ec_IC=qubit["Ec_IC"],El_IC=qubit["El_IC"],Ej_IC=qubit["Ej_IC"])
-            qubit["Ej_actual"] = Ej
-            qubit["Ec_actual"] = Ec
-            qubit["El_actual"] = El
-            qubit["base_ex"] = base_ex
-            qubit["base_size"] = base_size
-            qubit["omega_01_actual"] = H0[1,1]-H0[0,0]
-            qubit["n_opp"] = n_opp
-            qubit["phi_opp"] = phi_opp
-            qubit['H0'] = H0
-            qubit["t_g"] = t_g
-            qubit["c_ops"] = c_ops
-            if len(H0) >= 3: qubit["omega_12_actual"] = H0[2,2]-H0[1,1]
-            else: qubit["omega_12_actual"] = np.inf
-            if len(H0) >= 4: qubit["omega_23_actual"] = H0[3,3]-H0[2,2]
-            else: qubit["omega_23_actual"] = np.inf
-            if len(H0) <= 2: qubit['alpha_actual'] = np.inf
-            else:            qubit["alpha_actual"] = H0[2,2]-H0[1,1] - (H0[1,1]-H0[0,0])
+            qubit, H0 = updt_qubit(qubit, gate_params)
         if t3: t_g = qubit["Lambdas"]/(H0[1,1]-H0[0,0])*2*np.pi
         else: t_g = qubit["t_g"]
         if hasattr(gate_params,"Omega_eq"):
@@ -1025,8 +1217,8 @@ def calib_gate(args):
         
         
         if t1 or t2:
-            qubit["base_ex"] = base_ex
-            qubit["base_size"] = base_size
+            """qubit["base_ex"] = base_ex
+            qubit["base_size"] = base_size"""
             omega_01 = np.real(H0[1,1]- H0[0,0])
         if t1:
             val = gate_params.lambda_eq.subs(sp.Symbol("omega_{01}"),omega_01)
@@ -1038,22 +1230,9 @@ def calib_gate(args):
         if t4: t4 = gate_params.get_matrix_inverse
         if t4:
             #get the inverted matrix such as to calculate the envelope fourier coefficients
-            func = gate_params.matrix_inverse
-            args = {
-                "t_g": t_g,
-                "omega_d": gate_params.omega_d,
-                "omega_01": qubit["omega_01_actual"],
-                "omega_12": qubit["omega_12_actual"],
-                "omega_23": qubit["omega_23_actual"],
-                "phi_opp": qubit["phi_opp"],
-                "gn_func": gate_params.gn_func,
-                "gm_func": gate_params.gm_func,
-                "forbidden_intervals": gate_params.forbidden_intervals,
-                "N": len(gate_params.envelope_coffs),
-                "doB": gate_params.doB,
-            }
-            c_arr = func(args)
-            gate_params.envelope_coffs = c_arr
+            if hasattr(gate_params,"initial_FAST"):
+                FASTTamp = gate_params.initial_FAST
+            gate_params = eval_coffs(gate_params, qubit, t_g, FASTamp=FASTTamp)
         if do_VZ:
             _, _, gate_params = eval_qubit(gate_params, qubit, t0_samplerate=3, calZ=True)
 

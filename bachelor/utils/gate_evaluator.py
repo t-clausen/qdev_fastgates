@@ -39,7 +39,7 @@ def evaluate(results,ideal_gate,light=False):#!validate
     sx, sy, sz = np.zeros((base_len,base_len),dtype=complex), np.zeros((base_len,base_len),dtype=complex), np.zeros((base_len,base_len),dtype=complex)
     sx[:2,:2], sy[:2,:2], sz[:2,:2] = sx_.full(), sy_.full(), sz_.full()
 
-    dotbloch = True
+    dotbloch = False
     if dotbloch and (not dotplotinited or not is_figure_active()):
         fig,axs = plt.subplots(1,3,figsize=(4.78,1.8), dpi=600,gridspec_kw={'width_ratios': [0.9,0.6,0.8]})
         #fig = plt.figure(figsize=(6,2), dpi=600, 

@@ -22,10 +22,44 @@ with open("config.txt", "r") as f:
 gate_names_2_eval = [#actual values are hidden off in the other file
     #"commensurate_x_virt_z_nooptim",#!dont use this one
     #"FAST-MAGNUS_nooptim",
-    "RWA_x_nooptim",
+    #"RWA_x_nooptim",
     #"FAST-DRAG",
     #"FAST-MAGNUS-DRAG",
-    #"FAST-MAGNUS-MAGNUS",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-woFAST-derrquad-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-woFAST-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-N2",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-N1",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-monoquad",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-dualquad",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-fullquad",
+    #"FAST-MAGNUS-MAGNUS-fix1707-amp-derrquad",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-derrquad-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-amp-N7",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-amp-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-N3",
+    
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-amp-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-amp-N5",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-fix2307-derrquad-amp-N5",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-fix2307-amp-N5",
+    "FAST-MAGNUS-MAGNUS-fix1707-hypFAST-fix2307-amp-N5",
+    "FAST-MAGNUS-MAGNUS-fix1707-hypFAST-fix2307-derrquad-amp-N5",
+    #"magnus1_x_virt_z_nooptim",
+    
+    
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-amp-N10",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-derrquad-N10",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-N10",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-amp-N10",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-derrquad-amp-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-monoquad-amp-N3",
+    #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-dualquad-amp-N3",
+    
+    
+    #"FAST-MAGNUS-MAGNUS-noFM",
+    #"FAST-MAGNUS-MAGNUS-minus",
+    #"FAST-MAGNUS-MAGNUS-amp",
     
     #"commensurate_x_virt_z",
     #"commensurate_x_virt_z_new",
@@ -68,14 +102,14 @@ def instantiate_learners(gate_name):
     learner = AdaptiveLearner(scores_withmeta[gate_name], [10, 1, 10, None, None, np.pi, (10,10000), 0, 0], framework="adaptive_area",truncation=2)
     return learner
 
-alpha_ICs = {
+"""alpha_ICs = {
     0.01: [0.01, 1, 0.5],
     0.1: [0.05, 1, 1.08],
     1: [0.27, 1, 2.4],
     10: [2, 1, 10],
     20: [4.02, 1, 21.7],
 }
-
+"""
 def main():
     #instantiate adaptive learner
     learners = {}
@@ -98,10 +132,7 @@ def main():
                 #alpha = 18
                 #for alpha in [10]:
                 #for alpha in [20]:
-                idx_IC = np.argmin(np.abs(np.array(list(alpha_ICs.keys())) - alpha))
-                Ec_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][0]
-                El_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][1]
-                Ej_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][2]
+                
                 for i in range(len(gate_names_2_eval)):
                     if gate_names_2_eval[i] not in scores_withmeta.keys():
                         scores_withmeta[gate_names_2_eval[i]] = []
@@ -125,8 +156,17 @@ def main():
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), 30e3, 20e3], framework="random",truncation=4)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,20), 30e3, 20e3], framework="random",truncation=5)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (20,80), 30e3, 20e3], framework="random",truncation=5)
+                    #alpha = 20
+                    scores_tmp = scores_withmeta[gate_names_2_eval[i]].copy()
+                    for j in range(len(scores_tmp)):
+                        scores_tmp[j]["alpha_target"] = np.log10(scores_tmp[j]["alpha_target"])
+                        scores_tmp[j]["Lambdas"] = np.log10(scores_tmp[j]["Lambdas"])
+                    learner = AdaptiveLearner(scores_tmp, [None, 1, None, 1, (np.log10(0.019),np.log10(20)), np.pi, (np.log10(0.2),np.log10(80)), np.inf, np.inf], framework="random",truncation=5)
+                    #learner = AdaptiveLearner(scores_tmp, [None, 1, None, 1, np.log10(alpha), np.pi, (np.log10(0.2),np.log10(80)), np.inf, np.inf], framework="random",truncation=5)
+                    print(alpha)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, (np.log10(0.019),np.log10(20)), np.pi, (np.log10(0.2),np.log10(20)), np.inf, np.inf], framework="random",truncation=5)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), np.inf, np.inf], framework="random",truncation=5)
-                    learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.99,1.01), np.inf, np.inf], framework="random",truncation=5)
+                    #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.99,1.01), np.inf, np.inf], framework="random",truncation=5)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,20), np.inf, np.inf], framework="random",truncation=2)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,10), 30e3, 20e3], framework="random",truncation=2)
                     #learner = AdaptiveLearner(scores_withmeta[gate_names_2_eval[i]], [None, 1, None, 1, alpha, np.pi, (0.2,80), np.inf, np.inf], framework="random",truncation=2)
@@ -148,7 +188,10 @@ def main():
                         continue
                     #get the next point to evaluate
                     learner = learners[gate_name]
-                    qubits_2_eval = learner.get_next_dp(N=30)
+                    qubits_2_eval = learner.get_next_dp(N=60)
+                    for i in range(len(qubits_2_eval)):
+                        qubits_2_eval[i]["alpha_target"] = np.power(10, qubits_2_eval[i]["alpha_target"])
+                        qubits_2_eval[i]["Lambdas"] = np.power(10, qubits_2_eval[i]["Lambdas"])
                     if "comm" in gate_name:# in this case, the gate should only be performed on integers of a certain periodicity.
                         period = 0.5
                         for i in range(len(qubits_2_eval)):
@@ -158,32 +201,39 @@ def main():
                         qubits_2_eval = [qubits_2_eval[i] for i in range(len(qubits_2_eval)) if qubits_2_eval[i]["Lambdas"] not in lambdas[:i]]
 
                     shuffle(qubits_2_eval)
-                    for i in range(len(qubits_2_eval)):
+                    """for i in range(len(qubits_2_eval)):
+                        a = qubits_2_eval[i]["alpha_target"]
+                        idx_IC = np.argmin(np.abs(np.array(list(alpha_ICs.keys())) - a))
+                        Ec_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][0]
+                        El_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][1]
+                        Ej_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][2]
                         qubits_2_eval[i]["Ec_IC"] = Ec_IC
                         qubits_2_eval[i]["El_IC"] = El_IC
-                        qubits_2_eval[i]["Ej_IC"] = Ej_IC
+                        qubits_2_eval[i]["Ej_IC"] = Ej_IC"""
+
                     gate_instances = []
                     gate_params = get_gate_params(gate_name)
                     for i in range(len(qubits_2_eval)):
                         gate_instances.append(copy(gate_params))
                     print(f"Evaluating {gate_name} with {len(qubits_2_eval)} qubits")
-                    if 1<0:
+                    #_, _, _, _, _, _, _, _, _, _ = qbi.init_qubit(qubits_2_eval[0]["Ec"], qubits_2_eval[0]["El"], qubits_2_eval[0]["Ej"], qubits_2_eval[0]["phi_dc"],qubits_2_eval[0]['omega_01_target'],qubits_2_eval[0]['alpha_target'], qubits_2_eval[0]["c_ops"], qubits_2_eval[0]["Lambdas"],truncation=qubits_2_eval[0]["truncation"], base_ex=qubits_2_eval[0]["base_ex"], base_size=qubits_2_eval[0]["base_size"],Ec_IC=qubits_2_eval[0]["Ec_IC"],El_IC=qubits_2_eval[0]["El_IC"],Ej_IC=qubits_2_eval[0]["Ej_IC"])
+                    if 0:
                         for i,qubit,gate in zip(range(len(qubits_2_eval)), qubits_2_eval, gate_instances):
                             qubits_2_eval[i], gate_instances[i] = calib_gate((qubit, gate))
                     else:
                         results = []
-                        with normalPool(processes=15) as pool:
+                        with normalPool(processes=12) as pool:
                             args = [(qubits_2_eval[i], gate_instances[i]) for i in range(len(qubits_2_eval))]
                             results = pool.map(calib_gate, args)
                             for i in range(len(qubits_2_eval)):
                                 #gate_instances[i] = results[i]
                                 qubits_2_eval[i], gate_instances[i] = results[i]
                     print("Starting evaluation")
-                    if 1>0:
+                    if 0:
                         results = [do_test(q,g) for q,g in zip(qubits_2_eval, gate_instances)]
                     else:
                         results = []
-                        with ProcessPool(max_workers=15) as pool:
+                        with ProcessPool(max_workers=14) as pool:
                             future = pool.map(do_test, qubits_2_eval, gate_instances, timeout=60*60)#!conservative
                             iter = future.result()
                             for i in range(len(qubits_2_eval)): 
@@ -217,6 +267,7 @@ def main():
                         pickle.dump(scores_withmeta, f)
                     #feed the datapoints to the learner
                     learner.feed_points(scores_withmeta[gate_name])
+                    learners[gate_name] = learner
                     
 
 
