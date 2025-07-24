@@ -85,8 +85,8 @@ def compute_inv_fix(args):
         FASTamp = args["FASTamp"]
     else:
         FASTamp = 0
-    Aamp = np.cos(FASTamp*np.pi/2)
-    Bamp = np.sin(FASTamp*np.pi/2)
+    Aamp = np.sin(FASTamp*np.pi/2)
+    Bamp = np.cos(FASTamp*np.pi/2)
     matrix_belem00 = [
         [
             Aamp*A_matrix_func(i,j,**args) + Bamp*B_matrix_func_fix(i,j,**args) + Aamp*A_matrix_func(j,i,**args) + Bamp*B_matrix_func_fix(j,i,**args)

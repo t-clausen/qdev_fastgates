@@ -22,7 +22,7 @@ with open("config.txt", "r") as f:
 gate_names_2_eval = [#actual values are hidden off in the other file
     #"commensurate_x_virt_z_nooptim",#!dont use this one
     #"FAST-MAGNUS_nooptim",
-    #"RWA_x_nooptim",
+    
     #"FAST-DRAG",
     #"FAST-MAGNUS-DRAG",
     #"FAST-MAGNUS-MAGNUS-fix1707-amp-N3",
@@ -43,9 +43,10 @@ gate_names_2_eval = [#actual values are hidden off in the other file
     #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-amp-N5",
     #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-fix2307-derrquad-amp-N5",
     #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-fix2307-amp-N5",
-    "FAST-MAGNUS-MAGNUS-fix1707-hypFAST-fix2307-amp-N5",
-    "FAST-MAGNUS-MAGNUS-fix1707-hypFAST-fix2307-derrquad-amp-N5",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-fix2307-amp-N5",
+    #"FAST-MAGNUS-MAGNUS-fix1707-hypFAST-fix2307-derrquad-amp-N5",
     #"magnus1_x_virt_z_nooptim",
+    "RWA_x_nooptim",
     
     
     #"FAST-MAGNUS-MAGNUS-fix1707-woFAST-amp-N10",
@@ -81,9 +82,12 @@ gate_names_2_eval = [#actual values are hidden off in the other file
     
 ]
 
+#save_name = "scores_withmeta.pickle"
+save_name = "scores_withmeta_justRWA_2407.pickle"
+
 scores_withmeta = {}
-if os.path.exists("scores_withmeta.pickle"):
-    with open("scores_withmeta.pickle", "rb") as f:
+if os.path.exists(save_name):
+    with open(save_name, "rb") as f:
         scores_withmeta = pickle.load(f)
 
 
@@ -102,14 +106,6 @@ def instantiate_learners(gate_name):
     learner = AdaptiveLearner(scores_withmeta[gate_name], [10, 1, 10, None, None, np.pi, (10,10000), 0, 0], framework="adaptive_area",truncation=2)
     return learner
 
-"""alpha_ICs = {
-    0.01: [0.01, 1, 0.5],
-    0.1: [0.05, 1, 1.08],
-    1: [0.27, 1, 2.4],
-    10: [2, 1, 10],
-    20: [4.02, 1, 21.7],
-}
-"""
 def main():
     #instantiate adaptive learner
     learners = {}
@@ -118,7 +114,7 @@ def main():
             scores_withmeta["comm_old"] = scores_withmeta[k]
             del scores_withmeta[k]
     #pickle
-    with open("scores_withmeta.pickle", "wb") as f:
+    with open(save_name, "wb") as f:
         pickle.dump(scores_withmeta, f)"""
     
     while True:
@@ -188,7 +184,7 @@ def main():
                         continue
                     #get the next point to evaluate
                     learner = learners[gate_name]
-                    qubits_2_eval = learner.get_next_dp(N=60)
+                    qubits_2_eval = learner.get_next_dp(N=10)
                     for i in range(len(qubits_2_eval)):
                         qubits_2_eval[i]["alpha_target"] = np.power(10, qubits_2_eval[i]["alpha_target"])
                         qubits_2_eval[i]["Lambdas"] = np.power(10, qubits_2_eval[i]["Lambdas"])
@@ -201,15 +197,6 @@ def main():
                         qubits_2_eval = [qubits_2_eval[i] for i in range(len(qubits_2_eval)) if qubits_2_eval[i]["Lambdas"] not in lambdas[:i]]
 
                     shuffle(qubits_2_eval)
-                    """for i in range(len(qubits_2_eval)):
-                        a = qubits_2_eval[i]["alpha_target"]
-                        idx_IC = np.argmin(np.abs(np.array(list(alpha_ICs.keys())) - a))
-                        Ec_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][0]
-                        El_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][1]
-                        Ej_IC = alpha_ICs[list(alpha_ICs.keys())[idx_IC]][2]
-                        qubits_2_eval[i]["Ec_IC"] = Ec_IC
-                        qubits_2_eval[i]["El_IC"] = El_IC
-                        qubits_2_eval[i]["Ej_IC"] = Ej_IC"""
 
                     gate_instances = []
                     gate_params = get_gate_params(gate_name)
@@ -222,7 +209,7 @@ def main():
                             qubits_2_eval[i], gate_instances[i] = calib_gate((qubit, gate))
                     else:
                         results = []
-                        with normalPool(processes=12) as pool:
+                        with normalPool(processes=5) as pool:
                             args = [(qubits_2_eval[i], gate_instances[i]) for i in range(len(qubits_2_eval))]
                             results = pool.map(calib_gate, args)
                             for i in range(len(qubits_2_eval)):
@@ -233,7 +220,7 @@ def main():
                         results = [do_test(q,g) for q,g in zip(qubits_2_eval, gate_instances)]
                     else:
                         results = []
-                        with ProcessPool(max_workers=14) as pool:
+                        with ProcessPool(max_workers=5) as pool:
                             future = pool.map(do_test, qubits_2_eval, gate_instances, timeout=60*60)#!conservative
                             iter = future.result()
                             for i in range(len(qubits_2_eval)): 
@@ -263,7 +250,7 @@ def main():
                         for j,point in enumerate(points):
                             #point["gate"] = gate_name
                             scores_withmeta[gate_name].append(point)
-                    with open(f"scores_withmeta.pickle", "wb") as f:
+                    with open(save_name, "wb") as f:
                         pickle.dump(scores_withmeta, f)
                     #feed the datapoints to the learner
                     learner.feed_points(scores_withmeta[gate_name])

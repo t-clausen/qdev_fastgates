@@ -95,7 +95,7 @@ class AdaptiveLearner:
                     self.learner.tell(x,np.log10(1.01-y))
         elif framework == "random":
             import random
-            self.learner = random.Random()
+            self.learner = random.Random(time.time())
         elif framework == "bayesian":
             if len(self.xs[0]) >= 2:
                 raise NotImplementedError("Not for multi-dim please")
@@ -751,7 +751,7 @@ def single_param(gate_params, qubit, gate, do_VZ=False):
                         print(f"Invalid score for {valname} = {val}, score = {l}")
                         return 1
                     print(l)
-                    if 1:
+                    if 0:
                         plt.clf()
                         plt.scatter(vals, scores)
                         plt.xlabel("Value")
@@ -1087,6 +1087,8 @@ def calib_gate(args):
             amp_init = [amp_init, otheramp]
         amps = []
         losses = []
+        fixedOther = None
+        fixedFAST = None
         def loss(amp):
             if other is  None:
                 amp = float(amp)
@@ -1095,6 +1097,12 @@ def calib_gate(args):
                 amp = np.array(amp, dtype=float)
                 ampFAST = amp[0]
                 ampOther = amp[1]
+                if fixedOther is not None:
+                    if amp[1] != fixedOther:
+                        return np.inf
+            if fixedFAST is not None:
+                if ampFAST != fixedFAST:
+                    return np.inf
             if ampFAST < 0 or ampFAST > 1: return np.inf
             local_gate_params = copy(gate_params)
             amps.append(amp)
@@ -1105,6 +1113,9 @@ def calib_gate(args):
             score, _, _ = eval_qubit(local_gate_params, qubit, t0_samplerate=3, calZ=True)
             print(f"FAST loss for {qubit['name']} with {gate}: {score.real} for amp {amp}")
             losses.append(-score.real)
+            if 1-score.real < 1e-7:
+                print("Target fidelity reached")
+                raise StopIteration("Target fidelity reached")
             if 1:
                 plt.clf()
                 cmap = plt.get_cmap("viridis")
@@ -1122,12 +1133,9 @@ def calib_gate(args):
                 plt.savefig(f"temp/calibration.png")
                 plt.clf()
                 plt.close("all")
-            if 1-score.real < 1e-7:
-                print("Target fidelity reached")
-                raise StopIteration("Target fidelity reached")
             return -score.real
         #use a simple minimization to find the best amp
-        try:
+        """try:
             amax = 1
             for a in np.linspace(0, amax, 3):
                 if other is None:
@@ -1142,6 +1150,38 @@ def calib_gate(args):
             amp_best = res.x
             if other is None:
                 amp_best = amp_best[0]
+        except StopIteration:
+            print("Target fidelity reached")
+            amp_best = amps[np.argmin(losses)]"""
+        try:#step1: 1D FASTamp calib
+            for a in np.linspace(0, 1, 5):
+                if other is not None:
+                    o = amp_init[1]
+                else:
+                    o = None
+                amptry = [a, o]
+                loss(amptry)
+            amp_init = amps[np.argmin(losses)]
+            fixedOther = amp_init[1] if other is not None else None
+            res = minimize(loss, amp_init, method="Nelder-Mead", options={"maxiter": 50})
+            amp_best = res.x
+            if other is None:#!not tested
+                amp_best = amp_best[0]
+            if other is not None:
+                if amp_best[0] < 0.00001 or amp_best[0] > 0.9999:#case 1: amp is in one of the discontinuities
+                    fixedFAST = amp_best[0]
+                    fixedOther = None
+                    amp_initial = [fixedFAST, otheramp]
+                    res = minimize(loss, amp_initial, method="Nelder-Mead", options={"maxiter": 50})
+                    amp_initial = res.x
+                    fixedFAST = None
+                else:#case 2: amp is in the continuous region
+                    
+                    fixedFAST = None
+                    fixedOther = None
+                    amp_initial = amp_best
+                res = minimize(loss, amp_initial, method="Nelder-Mead", options={"maxiter": 50})
+                amp_best = res.x
         except StopIteration:
             print("Target fidelity reached")
             amp_best = amps[np.argmin(losses)]

@@ -85,15 +85,18 @@ def simulate(solvers, start_states, t0,t_end):
     for j in range(len(start_states)):
         #print(start_states[j].full())
         #result = solvers[i].run(start_states[j], np.linspace(t0,t_length,int(500)))
-        if is_opp_solver:
-            prop = solvers[i](t_end, t0)
-            #print(prop.full())
+        try:
+            if is_opp_solver:
+                prop = solvers[i](t_end, t0)
+                #print(prop.full())
 
-            result = prop
-        else:
-            result = solvers[i].run(start_states[j], np.linspace(t0,t_end,200))
-        
-        results.append(result)
+                result = prop
+            else:
+                result = solvers[i].run(start_states[j], np.linspace(t0,t_end,200))
+            results.append(result)
+        except qt.solver.integrator.integrator.IntegratorException as e:
+            print(f"IntegratorException: {e}")
+            result = None
         #print(result.states[0].full())
     return results
 
